@@ -1,14 +1,28 @@
 import 'dart:async';
 import 'dart:typed_data';
 import 'dart:ui';
-
 import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 
-void main() {
+final supabase = Supabase.instance.client;
+void main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  try {
+  await Supabase.initialize( 
+    url: 'https://bxfekcnibpzybsuqtvfw.supabase.co',
+    publishableKey: 'sb_publishable_iD82G2crN4l-_AwwFhEV2g_JlTt71W0',
+  );
+
+  debugPrint('✅ Supabase connected successfully!'); // This will show in terminal
+    
+  } catch (e) {
+    debugPrint('❌ Connection failed: $e'); // This shows if there's an error
+  }
+
   runApp(
     MultiProvider(
       providers: [
@@ -4843,6 +4857,20 @@ class _AddProductDialogState extends State<AddProductDialog> {
         TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
         FilledButton(onPressed: submit, child: const Text('POST')),
       ],
+    );
+  }
+}
+class MyApp extends StatelessWidget {
+  const MyApp({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return MaterialApp(
+      title: 'My App',
+      home: Scaffold(
+        appBar: AppBar(title: const Text('Home')),
+        body: const Center(child: Text('Supabase is connected!')),
+      ),
     );
   }
 }

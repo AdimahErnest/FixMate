@@ -9,20 +9,18 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 final supabase = Supabase.instance.client;
+
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   try {
-  await Supabase.initialize( 
-    url: 'https://bxfekcnibpzybsuqtvfw.supabase.co',
-    publishableKey: 'sb_publishable_iD82G2crN4l-_AwwFhEV2g_JlTt71W0',
-  );
-
-  debugPrint('✅ Supabase connected successfully!'); // This will show in terminal
-    
+    await Supabase.initialize(
+      url: 'https://bxfekcnibpzybsuqtvfw.supabase.co',
+      publishableKey: 'sb_publishable_iD82G2crN4l-_AwwFhEV2g_JlTt71W0',
+    );
+    debugPrint('✅ Supabase connected successfully!');
   } catch (e) {
-    debugPrint('❌ Connection failed: $e'); // This shows if there's an error
+    debugPrint('❌ Connection failed: $e');
   }
-
   runApp(
     MultiProvider(
       providers: [
@@ -36,401 +34,242 @@ void main() async {
 // ============================================================
 // APP STATE
 // ============================================================
-
 class AppState extends ChangeNotifier {
   ThemeMode themeMode = ThemeMode.light;
-
-  // English or Français
   String language = 'English';
-
   String userRole = '';
   bool loggedIn = false;
   String loginIdentifier = '';
-
   List<CartItem> cartItems = [];
   List<Product> products = List<Product>.from(shopProducts);
   List<String> activities = [];
   List<String> supplierNotifications = [];
-
   String profileName = 'FixMate User';
   String profileEmail = 'example@gmail.com';
   String profilePhone = '+237 6XX XXX XXX';
   String profileLocation = 'Douala';
   double profileRating = 4.8;
   Uint8List? profileImageBytes;
+  String? profileImageUrl;
 
   bool get isFrench => language == 'Français';
-
   List<Product> get catalogProducts => products;
 
   // ----------------------------------------------------------
-  // TRANSLATION
+  // SUPABASE AUTH & DATA
   // ----------------------------------------------------------
+  Future<bool> signInSupabase(String email, String password) async {
+    try {
+      final response = await supabase.auth.signInWithPassword(email: email, password: password);
+      if (response.user != null) {
+        final profile = await supabase.from('profiles').select().eq('id', response.user!.id).single();
+        userRole = profile['role'] ?? 'Customer';
+        profileName = profile['full_name'] ?? 'FixMate User';
+        profileEmail = profile['email'] ?? email;
+        profilePhone = profile['phone'] ?? '';
+        profileLocation = profile['location'] ?? 'Douala';
+        profileImageUrl = profile['profile_image_url'];
+        loginIdentifier = email;
+        loggedIn = true;
+        notifyListeners();
+        return true;
+      }
+      return false;
+    } catch (e) {
+      debugPrint('Sign in error: $e');
+      return false;
+    }
+  }
 
-  String tr(String key, {Map<String, String>? params}) {
-    final Map<String, String> french = {
-      // General
-      'English': 'English',
-      'Français': 'Français',
-      'Select': 'Sélectionner',
-      'Home': 'Accueil',
-      'Shop': 'Boutique',
-      'Subscription': 'Abonnement',
-      'Profile': 'Profil',
-      'Technicians': 'Techniciens',
-      'Customer': 'Client',
-      'Technician': 'Technicien',
-      'Supplier': 'Fournisseur',
-      'Admin': 'Administrateur',
-      'Dashboard': 'Tableau de bord',
-      'Platform overview': 'Vue d’ensemble de la plateforme',
-      'Manage platform operations and approvals.': 'Gérez les opérations et validations de la plateforme.',
-      'Pending approvals': 'Approbations en attente',
-      'Active technicians': 'Techniciens actifs',
-      'Monthly revenue': 'Revenu mensuel',
-      'Open disputes': 'Litiges ouverts',
-      'Review supplier requests': 'Vérifier les demandes fournisseurs',
-      'Verify technician profiles': 'Vérifier les profils techniciens',
-      'Resolve customer complaints': 'Traiter les plaintes clients',
-      'View analytics': 'Voir les statistiques',
-      'Recent platform activity': 'Activité récente de la plateforme',
-      'New supplier onboarding': 'Nouvelle inscription fournisseur',
-      'Technician verification complete': 'Vérification du technicien terminée',
-      'Payment dispute escalated': 'Litige de paiement escaladé',
-      'Campaign promotion approved': 'Campagne promotionnelle approuvée',
-      'Approve': 'Approuver',
-      'Quick actions': 'Actions rapides',
+  Future<bool> signUpSupabase({required String email, required String password, required String role, required String fullName, String? phone}) async {
+    try {
+      final response = await supabase.auth.signUp(email: email, password: password, data: {'role': role, 'full_name': fullName});
+      if (response.user != null) {
+        await supabase.from('profiles').update({'phone': phone, 'location': 'Douala'}).eq('id', response.user!.id);
+        if (role == 'Technician') await supabase.from('technicians').insert({'id': response.user!.id});
+        if (role == 'Supplier') await supabase.from('suppliers').insert({'id': response.user!.id});
+        return true;
+      }
+      return false;
+    } catch (e) {
+      debugPrint('Sign up error: $e');
+      return false;
+    }
+  }
 
-      // Login
-      'Welcome to FixMate': 'Bienvenue sur FixMate',
-      'Your trusted technician marketplace':
-          'Votre plateforme de techniciens de confiance',
-      'Email, phone number or name':
-          'E-mail, numéro de téléphone ou nom',
-      'Email': 'E-mail',
-      'Phone number': 'Numéro de téléphone',
-      'Password': 'Mot de passe',
-      'Forgot password?': 'Mot de passe oublié ?',
-      'LOG IN': 'SE CONNECTER',
-      "Don't have an account?": "Vous n'avez pas de compte ?",
-      'Sign up': "S'inscrire",
-      'Please enter your email, phone number or name.':
-          'Veuillez entrer votre e-mail, numéro de téléphone ou nom.',
-      'Please enter your password.':
-          'Veuillez entrer votre mot de passe.',
-        'Password reset instructions sent.':
-          'Instructions de réinitialisation du mot de passe envoyées.',
-        'Subscription request received.':
-          'Demande d abonnement reçue.',
+  Future<void> signOutSupabase() async {
+    await supabase.auth.signOut();
+    userRole = '';
+    loggedIn = false;
+    loginIdentifier = '';
+    cartItems.clear();
+    notifyListeners();
+  }
 
-      // Role selection
-      'Select account type': 'Sélectionnez le type de compte',
-      'Demo login': 'Connexion de démonstration',
-      'Until Firebase authentication is connected, select the type of account you want to test.':
-          "En attendant la connexion de Firebase Authentication, sélectionnez le type de compte que vous souhaitez tester.",
-      'Find technicians and purchase products.':
-          'Trouver des techniciens et acheter des produits.',
-      'Offer services and receive customer requests.':
-          'Proposer des services et recevoir des demandes de clients.',
-      'Sell tools, parts and equipment.':
-          'Vendre des outils, pièces et équipements.',
-      'Create your account': 'Créez votre compte',
-      'I want to register as:': "Je veux m'inscrire en tant que :",
-      'Request technicians and purchase products.':
-          "Demander l'intervention de techniciens et acheter des produits.",
-      'Provide professional repair and maintenance services.':
-          'Fournir des services professionnels de réparation et de maintenance.',
-      'Sell tools, equipment, spare parts and materials.':
-          'Vendre des outils, équipements, pièces détachées et matériaux.',
+  Future<void> uploadProfileImageSupabase(Uint8List bytes) async {
+    try {
+      final user = supabase.auth.currentUser;
+      if (user == null) return;
+      final path = '${user.id}/profile.jpg';
+      await supabase.storage.from('profile-images').upload(path, bytes, fileOptions: const FileOptions(upsert: true));
+      final url = supabase.storage.from('profile-images').getPublicUrl(path);
+      await supabase.from('profiles').update({'profile_image_url': url}).eq('id', user.id);
+      profileImageUrl = url;
+      profileImageBytes = bytes;
+      notifyListeners();
+    } catch (e) {
+      debugPrint('Upload error: $e');
+    }
+  }
 
-      // Customer registration
-      'Customer Registration': 'Inscription client',
-      'Create customer account': 'Créer un compte client',
-      'Find trusted technicians and buy products on FixMate.':
-          'Trouvez des techniciens de confiance et achetez des produits sur FixMate.',
-      'First name': 'Prénom',
-      'Last name': 'Nom',
-      'Confirm password': 'Confirmer le mot de passe',
-      'CREATE CUSTOMER ACCOUNT': 'CRÉER LE COMPTE CLIENT',
+  Future<void> createServiceRequestSupabase({required String technicianId, required String service, required String description}) async {
+    try {
+      final user = supabase.auth.currentUser;
+      if (user == null) return;
+      await supabase.from('service_requests').insert({
+        'customer_id': user.id,
+        'technician_id': technicianId,
+        'service_type': service,
+        'description': description,
+        'status': 'pending',
+      });
+      activities.add('Requested $service');
+      notifyListeners();
+    } catch (e) {
+      debugPrint('Service request error: $e');
+    }
+  }
 
-      // Technician registration
-      'Technician Registration': 'Inscription technicien',
-      'Create technician account': 'Créer un compte technicien',
-      'Offer your professional services to customers.':
-          'Proposez vos services professionnels aux clients.',
-      'Services you provide': 'Services que vous proposez',
-      'CREATE TECHNICIAN ACCOUNT': 'CRÉER LE COMPTE TECHNICIEN',
-      'Please select at least one service.':
-          'Veuillez sélectionner au moins un service.',
-
-      // Supplier registration
-      'Supplier Registration': 'Inscription fournisseur',
-      'Create supplier account': 'Créer un compte fournisseur',
-      'Sell tools, equipment, spare parts and materials..':
-          'Vendez des outils, équipements, pièces détachées et matériaux..',
-      'Company name': "Nom de l'entreprise",
-      'Additional phone number': 'Numéro de téléphone supplémentaire',
-      'Items you supply': 'Articles que vous fournissez',
-      'Location': 'Localisation',
-      'Region': 'Région',
-      'Town': 'Ville',
-      'Business verification documents can be submitted after registration.':
-          "Les documents de vérification de l'entreprise peuvent être soumis après l'inscription.",
-      'CREATE SUPPLIER ACCOUNT': 'CRÉER LE COMPTE FOURNISSEUR',
-      'Please select at least one item category.':
-          "Veuillez sélectionner au moins une catégorie d'articles.",
-
-      // Password
-      'Passwords do not match.':
-          'Les mots de passe ne correspondent pas.',
-
-      // Home
-      'Your trusted technician marketplace.':
-          'Votre plateforme de techniciens de confiance.',
-      'Find technicians, buy tools and equipment, and get your problems solved.':
-          'Trouvez des techniciens, achetez des outils et équipements et faites résoudre vos problèmes.',
-      'Need a technician?': "Besoin d'un technicien ?",
-      'Find a professional near you.':
-          'Trouvez un professionnel près de chez vous.',
-      'Find a Technician': 'Trouver un technicien',
-      'Popular Services': 'Services populaires',
-      'Electricity': 'Électricité',
-      'Plumbing': 'Plomberie',
-      'AC & Refrigeration': 'Climatisation et réfrigération',
-      'Phone Repair': 'Réparation de téléphones',
-      'Computer Repair': 'Réparation informatique',
-      'Solar': 'Solaire',
-      'Auto Repair': 'Réparation automobile',
-      'Appliances': 'Électroménager',
-      'How FixMate works': 'Comment fonctionne FixMate',
-      'Find': 'Trouver',
-      'Find a technician or product.':
-          'Trouvez un technicien ou un produit.',
-      'Request': 'Demander',
-      'Describe your problem and location.':
-          'Décrivez votre problème et votre localisation.',
-      'Get it fixed': 'Faites réparer',
-      'Your technician comes to you.':
-          'Votre technicien vient chez vous.',
-      'Rate': 'Évaluer',
-      'Rate your experience.':
-          'Évaluez votre expérience.',
-
-      // Technician page
-      'Search technician': 'Rechercher un technicien',
-      'service': 'service',
-      'town': 'ville',
-      'region': 'région',
-      'Service': 'Service',
-      'Rating': 'Note',
-      'Distance': 'Distance',
-      'Sort': 'Trier',
-      'Certified': 'Certifié',
-      'jobs completed': 'interventions terminées',
-      'VIEW PROFILE': 'VOIR LE PROFIL',
-
-      // Shop
-      'FixMate Shop': 'Boutique FixMate',
-      'Search products': 'Rechercher des produits',
-      'tools': 'outils',
-      'suppliers': 'fournisseurs',
-      'categories': 'catégories',
-      'Products & Tools': 'Produits et outils',
-      'ADD TO CART': 'AJOUTER AU PANIER',
-      'POST PRODUCT': 'PUBLIER UN PRODUIT',
-      'No technicians found.': 'Aucun technicien trouvé.',
-      'All services': 'Tous les services',
-      'Clear filters': 'Effacer les filtres',
-
-      // Products
-      'Digital Multimeter': 'Multimètre numérique',
-      'Electric Drill': 'Perceuse électrique',
-      'Soldering Station': 'Station de soudage',
-      'Tool Set': "Jeu d'outils",
-      'Voltage Tester': 'Testeur de tension',
-      'Solar Controller': 'Régulateur solaire',
-
-      // Cart
-      'My Cart': 'Mon panier',
-      'Your cart is empty.': 'Votre panier est vide.',
-      'Add products from the shop.':
-          'Ajoutez des produits depuis la boutique.',
-      'Total': 'Total',
-      'CHECKOUT': 'PASSER LA COMMANDE',
-      'Order placed! Thank you.':
-          'Commande passée ! Merci.',
-
-      // Subscription
-      'FixMate Subscription': 'Abonnement FixMate',
-      'Your technician account includes a 7-day free trial.':
-          'Votre compte technicien comprend un essai gratuit de 7 jours.',
-      'Choose the plan that works best for your business.':
-          'Choisissez le forfait qui convient le mieux à votre activité.',
-      'Monthly': 'Mensuel',
-      'Flexible monthly subscription.':
-          'Abonnement mensuel flexible.',
-      'month': 'mois',
-      'Annual': 'Annuel',
-      'Best value for long-term users.':
-          'Meilleur rapport qualité-prix pour une utilisation à long terme.',
-      'year': 'an',
-      'RECOMMENDED': 'RECOMMANDÉ',
-      'Payment methods': 'Modes de paiement',
-      'MTN Mobile Money': 'MTN Mobile Money',
-      'Orange Money': 'Orange Money',
-      'Visa / Card': 'Visa / Carte',
-      'Bank': 'Banque',
-      'SUBSCRIBE': "S'ABONNER",
-      'Please choose a subscription plan.': 'Veuillez choisir un forfait d abonnement.',
-      'Please choose a payment method.': 'Veuillez choisir un mode de paiement.',
-
-      // Profile
-      'My Profile': 'Mon profil',
-      'FixMate User': 'Utilisateur FixMate',
-      'Edit Profile': 'Modifier le profil',
-      'Phone Numbers': 'Numéros de téléphone',
-      'Change Password': 'Modifier le mot de passe',
-      'Verification & Documents': 'Vérification et documents',
-      'My Ratings': 'Mes évaluations',
-      'My Activity': 'Mon activité',
-      'LOG OUT': 'SE DÉCONNECTER',
-        'Services provided': 'Services proposés',
-        'Request this technician': 'Demander ce technicien',
-        'Describe the service you need.':
-          'Décrivez le service dont vous avez besoin.',
-        'Please describe the service you need.':
-          'Veuillez décrire le service dont vous avez besoin.',
-        'Service request sent successfully.':
-          'Demande de service envoyée avec succès.',
-        'REQUEST SERVICE': 'DEMANDER LE SERVICE',
-        'Choose profile picture': 'Choisir une photo de profil',
-        'Choose from device': 'Choisir depuis l appareil',
-        'Take a photo': 'Prendre une photo',
-
-      // Language/theme
-      'Light mode': 'Mode clair',
-      'Dark mode': 'Mode sombre',
-      'Language': 'Langue',
-      'Search...': 'Rechercher...',
-
-      // Services
-      'Refrigeration & Air Conditioning':
-          'Réfrigération et climatisation',
-      'Phone Repairs': 'Réparation de téléphones',
-      'Carpentry': 'Menuiserie',
-      'Painting': 'Peinture',
-      'Welding': 'Soudure',
-      'Masonry': 'Maçonnerie',
-      'Tiling': 'Carrelage',
-      'Fenestration': 'Fenêtres et portes',
-      'Home Appliance Repair':
-          "Réparation d'appareils électroménagers",
-      'Computer & IT Tools Repair':
-          'Réparation informatique et équipements IT',
-      'Audio Repair': 'Réparation audio',
-      'Electronics Repair': 'Réparation électronique',
-      'Solar Maintenance & Repair':
-          'Maintenance et réparation solaire',
-
-      // Supplier categories
-      'Electrical Materials': 'Matériel électrique',
-      'Plumbing Materials': 'Matériel de plomberie',
-      'Refrigeration Equipment': 'Équipement de réfrigération',
-      'Air Conditioning Equipment': 'Équipement de climatisation',
-      'Phone Parts': 'Pièces de téléphone',
-      'Carpentry Materials': 'Matériaux de menuiserie',
-      'Paint': 'Peinture',
-      'Welding Equipment': 'Équipement de soudage',
-      'Masonry Materials': 'Matériaux de maçonnerie',
-      'Tiles': 'Carrelage',
-      'Windows & Doors': 'Fenêtres et portes',
-      'Auto Parts': 'Pièces automobiles',
-      'Home Appliances': 'Appareils électroménagers',
-      'Computers': 'Ordinateurs',
-      'IT Equipment': 'Équipement informatique',
-      'Audio Equipment': 'Équipement audio',
-      'Electronic Components': 'Composants électroniques',
-      'Solar Equipment': 'Équipement solaire',
-      'Tools': 'Outils',
-      'Safety Equipment': 'Équipement de sécurité',
-      'Other': 'Autre',
-
-      // Demo technicians
-      'Electricity/Solar': 'Électricité/Solaire',
-      'Plumbing/Masonry': 'Plomberie/Maçonnerie',
-      'Phone Repairs/Electronics':
-          'Réparation de téléphones/Électronique',
-    };
-
-    String result = language == 'Français'
-        ? (french[key] ?? key)
-        : key;
-
-    params?.forEach((name, value) {
-      result = result.replaceAll('{$name}', value);
-    });
-
-    return result;
+  Future<void> completePurchaseSupabase() async {
+    if (cartItems.isEmpty) return;
+    try {
+      final user = supabase.auth.currentUser;
+      if (user == null) return;
+      final order = await supabase.from('orders').insert({
+        'customer_id': user.id,
+        'total_amount': cartTotal,
+        'status': 'pending',
+        'payment_status': 'unpaid',
+      }).select().single();
+      
+      for (var item in cartItems) {
+        await supabase.from('order_items').insert({
+          'order_id': order['id'],
+          'product_name': item.name,
+          'quantity': item.quantity,
+          'price': item.price,
+        });
+      }
+      activities.add('Purchased ${cartItems.length} product(s)');
+      cartItems.clear();
+      notifyListeners();
+    } catch (e) {
+      debugPrint('Purchase error: $e');
+    }
   }
 
   // ----------------------------------------------------------
-  // SETTINGS
+  // ORIGINAL METHODS (KEPT INTACT FOR UI COMPATIBILITY)
   // ----------------------------------------------------------
+  String tr(String key, {Map<String, String>? params}) {
+    final Map<String, String> french = {
+      'English': 'English', 'Français': 'Français', 'Select': 'Sélectionner', 'Home': 'Accueil', 'Shop': 'Boutique',
+      'Subscription': 'Abonnement', 'Profile': 'Profil', 'Technicians': 'Techniciens', 'Customer': 'Client',
+      'Technician': 'Technicien', 'Supplier': 'Fournisseur', 'Admin': 'Administrateur', 'Dashboard': 'Tableau de bord',
+      'Platform overview': 'Vue d’ensemble de la plateforme', 'Manage platform operations and approvals.': 'Gérez les opérations et validations de la plateforme.',
+      'Pending approvals': 'Approbations en attente', 'Active technicians': 'Techniciens actifs', 'Monthly revenue': 'Revenu mensuel',
+      'Open disputes': 'Litiges ouverts', 'Review supplier requests': 'Vérifier les demandes fournisseurs', 'Verify technician profiles': 'Vérifier les profils techniciens',
+      'Resolve customer complaints': 'Traiter les plaintes clients', 'View analytics': 'Voir les statistiques', 'Recent platform activity': 'Activité récente de la plateforme',
+      'New supplier onboarding': 'Nouvelle inscription fournisseur', 'Technician verification complete': 'Vérification du technicien terminée',
+      'Payment dispute escalated': 'Litige de paiement escaladé', 'Campaign promotion approved': 'Campagne promotionnelle approuvée', 'Approve': 'Approuver',
+      'Quick actions': 'Actions rapides', 'Welcome to FixMate': 'Bienvenue sur FixMate', 'Your trusted technician marketplace': 'Votre plateforme de techniciens de confiance',
+      'Email, phone number or name': 'E-mail, numéro de téléphone ou nom', 'Email': 'E-mail', 'Phone number': 'Numéro de téléphone', 'Password': 'Mot de passe',
+      'Forgot password?': 'Mot de passe oublié ?', 'LOG IN': 'SE CONNECTER', "Don't have an account?": "Vous n'avez pas de compte ?", 'Sign up': "S'inscrire",
+      'Please enter your email, phone number or name.': 'Veuillez entrer votre e-mail, numéro de téléphone ou nom.', 'Please enter your password.': 'Veuillez entrer votre mot de passe.',
+      'Password reset instructions sent.': 'Instructions de réinitialisation du mot de passe envoyées.', 'Subscription request received.': 'Demande d abonnement reçue.',
+      'Select account type': 'Sélectionnez le type de compte', 'Demo login': 'Connexion de démonstration',
+      'Until Firebase authentication is connected, select the type of account you want to test.': "En attendant la connexion de Firebase Authentication, sélectionnez le type de compte que vous souhaitez tester.",
+      'Find technicians and purchase products.': 'Trouver des techniciens et acheter des produits.', 'Offer services and receive customer requests.': 'Proposer des services et recevoir des demandes de clients.',
+      'Sell tools, parts and equipment.': 'Vendre des outils, pièces et équipements.', 'Create your account': 'Créez votre compte', 'I want to register as:': "Je veux m'inscrire en tant que :",
+      'Request technicians and purchase products.': "Demander l'intervention de techniciens et acheter des produits.", 'Provide professional repair and maintenance services.': 'Fournir des services professionnels de réparation et de maintenance.',
+      'Sell tools, equipment, spare parts and materials.': 'Vendre des outils, équipements, pièces détachées et matériaux.', 'Customer Registration': 'Inscription client',
+      'Create customer account': 'Créer un compte client', 'Find trusted technicians and buy products on FixMate.': 'Trouvez des techniciens de confiance et achetez des produits sur FixMate.',
+      'First name': 'Prénom', 'Last name': 'Nom', 'Confirm password': 'Confirmer le mot de passe', 'CREATE CUSTOMER ACCOUNT': 'CRÉER LE COMPTE CLIENT',
+      'Technician Registration': 'Inscription technicien', 'Create technician account': 'Créer un compte technicien', 'Offer your professional services to customers.': 'Proposez vos services professionnels aux clients.',
+      'Services you provide': 'Services que vous proposez', 'CREATE TECHNICIAN ACCOUNT': 'CRÉER LE COMPTE TECHNICIEN', 'Please select at least one service.': 'Veuillez sélectionner au moins un service.',
+      'Supplier Registration': 'Inscription fournisseur', 'Create supplier account': 'Créer un compte fournisseur', 'Sell tools, equipment, spare parts and materials..': 'Vendez des outils, équipements, pièces détachées et matériaux..',
+      'Company name': "Nom de l'entreprise", 'Additional phone number': 'Numéro de téléphone supplémentaire', 'Items you supply': 'Articles que vous fournissez', 'Location': 'Localisation',
+      'Region': 'Région', 'Town': 'Ville', 'Business verification documents can be submitted after registration.': "Les documents de vérification de l'entreprise peuvent être soumis après l'inscription.",
+      'CREATE SUPPLIER ACCOUNT': 'CRÉER LE COMPTE FOURNISSEUR', 'Please select at least one item category.': "Veuillez sélectionner au moins une catégorie d'articles.",
+      'Passwords do not match.': 'Les mots de passe ne correspondent pas.', 'Your trusted technician marketplace.': 'Votre plateforme de techniciens de confiance.',
+      'Find technicians, buy tools and equipment, and get your problems solved.': 'Trouvez des techniciens, achetez des outils et équipements et faites résoudre vos problèmes.',
+      'Need a technician?': "Besoin d'un technicien ?", 'Find a professional near you.': 'Trouvez un professionnel près de chez vous.', 'Find a Technician': 'Trouver un technicien',
+      'Popular Services': 'Services populaires', 'Electricity': 'Électricité', 'Plumbing': 'Plomberie', 'AC & Refrigeration': 'Climatisation et réfrigération',
+      'Phone Repair': 'Réparation de téléphones', 'Computer Repair': 'Réparation informatique', 'Solar': 'Solaire', 'Auto Repair': 'Réparation automobile', 'Appliances': 'Électroménager',
+      'How FixMate works': 'Comment fonctionne FixMate', 'Find': 'Trouver', 'Find a technician or product.': 'Trouvez un technicien ou un produit.', 'Request': 'Demander',
+      'Describe your problem and location.': 'Décrivez votre problème et votre localisation.', 'Get it fixed': 'Faites réparer', 'Your technician comes to you.': 'Votre technicien vient chez vous.',
+      'Rate': 'Évaluer', 'Rate your experience.': 'Évaluez votre expérience.', 'Search technician': 'Rechercher un technicien', 'service': 'service', 'town': 'ville', 'region': 'région',
+      'Service': 'Service', 'Rating': 'Note', 'Distance': 'Distance', 'Sort': 'Trier', 'Certified': 'Certifié', 'jobs completed': 'interventions terminées', 'VIEW PROFILE': 'VOIR LE PROFIL',
+      'FixMate Shop': 'Boutique FixMate', 'Search products': 'Rechercher des produits', 'tools': 'outils', 'suppliers': 'fournisseurs', 'categories': 'catégories', 'Products & Tools': 'Produits et outils',
+      'ADD TO CART': 'AJOUTER AU PANIER', 'POST PRODUCT': 'PUBLIER UN PRODUIT', 'No technicians found.': 'Aucun technicien trouvé.', 'All services': 'Tous les services', 'Clear filters': 'Effacer les filtres',
+      'Digital Multimeter': 'Multimètre numérique', 'Electric Drill': 'Perceuse électrique', 'Soldering Station': 'Station de soudage', 'Tool Set': "Jeu d'outils", 'Voltage Tester': 'Testeur de tension',
+      'Solar Controller': 'Régulateur solaire', 'My Cart': 'Mon panier', 'Your cart is empty.': 'Votre panier est vide.', 'Add products from the shop.': 'Ajoutez des produits depuis la boutique.',
+      'Total': 'Total', 'CHECKOUT': 'PASSER LA COMMANDE', 'Order placed! Thank you.': 'Commande passée ! Merci.', 'FixMate Subscription': 'Abonnement FixMate',
+      'Your technician account includes a 7-day free trial.': 'Votre compte technicien comprend un essai gratuit de 7 jours.', 'Choose the plan that works best for your business.': 'Choisissez le forfait qui convient le mieux à votre activité.',
+      'Monthly': 'Mensuel', 'Flexible monthly subscription.': 'Abonnement mensuel flexible.', 'month': 'mois', 'Annual': 'Annuel', 'Best value for long-term users.': 'Meilleur rapport qualité-prix pour une utilisation à long terme.',
+      'year': 'an', 'RECOMMENDED': 'RECOMMANDÉ', 'Payment methods': 'Modes de paiement', 'MTN Mobile Money': 'MTN Mobile Money', 'Orange Money': 'Orange Money', 'Visa / Card': 'Visa / Carte',
+      'Bank': 'Banque', 'SUBSCRIBE': "S'ABONNER", 'Please choose a subscription plan.': 'Veuillez choisir un forfait d abonnement.', 'Please choose a payment method.': 'Veuillez choisir un mode de paiement.',
+      'My Profile': 'Mon profil', 'FixMate User': 'Utilisateur FixMate', 'Edit Profile': 'Modifier le profil', 'Phone Numbers': 'Numéros de téléphone', 'Change Password': 'Modifier le mot de passe',
+      'Verification & Documents': 'Vérification et documents', 'My Ratings': 'Mes évaluations', 'My Activity': 'Mon activité', 'LOG OUT': 'SE DÉCONNECTER', 'Services provided': 'Services proposés',
+      'Request this technician': 'Demander ce technicien', 'Describe the service you need.': 'Décrivez le service dont vous avez besoin.', 'Please describe the service you need.': 'Veuillez décrire le service dont vous avez besoin.',
+      'Service request sent successfully.': 'Demande de service envoyée avec succès.', 'REQUEST SERVICE': 'DEMANDER LE SERVICE', 'Choose profile picture': 'Choisir une photo de profil',
+      'Choose from device': 'Choisir depuis l appareil', 'Take a photo': 'Prendre une photo', 'Light mode': 'Mode clair', 'Dark mode': 'Mode sombre', 'Language': 'Langue', 'Search...': 'Rechercher...',
+      'Refrigeration & Air Conditioning': 'Réfrigération et climatisation', 'Phone Repairs': 'Réparation de téléphones', 'Carpentry': 'Menuiserie', 'Painting': 'Peinture', 'Welding': 'Soudure',
+      'Masonry': 'Maçonnerie', 'Tiling': 'Carrelage', 'Fenestration': 'Fenêtres et portes', 'Home Appliance Repair': "Réparation d'appareils électroménagers", 'Computer & IT Tools Repair': 'Réparation informatique et équipements IT',
+      'Audio Repair': 'Réparation audio', 'Electronics Repair': 'Réparation électronique', 'Solar Maintenance & Repair': 'Maintenance et réparation solaire', 'Electrical Materials': 'Matériel électrique',
+      'Plumbing Materials': 'Matériel de plomberie', 'Refrigeration Equipment': 'Équipement de réfrigération', 'Air Conditioning Equipment': 'Équipement de climatisation', 'Phone Parts': 'Pièces de téléphone',
+      'Carpentry Materials': 'Matériaux de menuiserie', 'Paint': 'Peinture', 'Welding Equipment': 'Équipement de soudage', 'Masonry Materials': 'Matériaux de maçonnerie', 'Tiles': 'Carrelage',
+      'Windows & Doors': 'Fenêtres et portes', 'Auto Parts': 'Pièces automobiles', 'Home Appliances': 'Appareils électroménagers', 'Computers': 'Ordinateurs', 'IT Equipment': 'Équipement informatique',
+      'Audio Equipment': 'Équipement audio', 'Electronic Components': 'Composants électroniques', 'Solar Equipment': 'Équipement solaire', 'Tools': 'Outils', 'Safety Equipment': 'Équipement de sécurité',
+      'Other': 'Autre', 'Electricity/Solar': 'Électricité/Solaire', 'Plumbing/Masonry': 'Plomberie/Maçonnerie', 'Phone Repairs/Electronics': 'Réparation de téléphones/Électronique',
+    };
+    String result = language == 'Français' ? (french[key] ?? key) : key;
+    params?.forEach((name, value) { result = result.replaceAll('{$name}', value); });
+    return result;
+  }
 
   Future<void> loadSettings() async {
     final prefs = await SharedPreferences.getInstance();
-
     final dark = prefs.getBool('darkMode') ?? false;
     final savedLanguage = prefs.getString('language') ?? 'English';
     final savedRole = prefs.getString('userRole') ?? '';
     final savedIdentifier = prefs.getString('loginIdentifier') ?? '';
-
     themeMode = dark ? ThemeMode.dark : ThemeMode.light;
     language = savedLanguage;
     userRole = savedRole;
     loginIdentifier = savedIdentifier;
     loggedIn = savedRole.isNotEmpty && savedIdentifier.isNotEmpty;
-
     notifyListeners();
   }
 
   Future<void> toggleTheme() async {
-    themeMode = themeMode == ThemeMode.light
-        ? ThemeMode.dark
-        : ThemeMode.light;
-
+    themeMode = themeMode == ThemeMode.light ? ThemeMode.dark : ThemeMode.light;
     final prefs = await SharedPreferences.getInstance();
-    await prefs.setBool(
-      'darkMode',
-      themeMode == ThemeMode.dark,
-    );
-
+    await prefs.setBool('darkMode', themeMode == ThemeMode.dark);
     notifyListeners();
   }
 
   Future<void> toggleLanguage() async {
     language = language == 'English' ? 'Français' : 'English';
-
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString('language', language);
-
     notifyListeners();
   }
-
-  // ----------------------------------------------------------
-  // AUTH
-  // ----------------------------------------------------------
 
   void login(String role) {
     userRole = role;
     loggedIn = true;
-    profileName = role == 'Supplier'
-      ? 'FixMate Supplies'
-      : role == 'Technician'
-        ? 'Jean Michel Mbarga'
-        : role == 'Admin'
-          ? 'FixMate Admin'
-          : 'FixMate User';
+    profileName = role == 'Supplier' ? 'FixMate Supplies' : role == 'Technician' ? 'Jean Michel Mbarga' : role == 'Admin' ? 'FixMate Admin' : 'FixMate User';
     SharedPreferences.getInstance().then((prefs) async {
       await prefs.setString('userRole', userRole);
       await prefs.setString('loginIdentifier', loginIdentifier);
@@ -450,52 +289,24 @@ class AppState extends ChangeNotifier {
     notifyListeners();
   }
 
-  // ----------------------------------------------------------
-  // CART
-  // ----------------------------------------------------------
-
-  int get cartCount {
-    return cartItems.fold(
-      0,
-      (sum, item) => sum + item.quantity,
-    );
-  }
-
-  double get cartTotal {
-    return cartItems.fold(
-      0,
-      (sum, item) => sum + (item.price * item.quantity),
-    );
-  }
+  int get cartCount => cartItems.fold(0, (sum, item) => sum + item.quantity);
+  double get cartTotal => cartItems.fold(0, (sum, item) => sum + (item.price * item.quantity));
 
   void addToCart(Product product) {
-    final index = cartItems.indexWhere(
-      (item) => item.name == product.name,
-    );
-
+    final index = cartItems.indexWhere((item) => item.name == product.name);
     if (index >= 0) {
       cartItems[index].quantity++;
     } else {
-      cartItems.add(
-        CartItem(
-          name: product.name,
-          price: product.price,
-          supplierName: product.supplierName,
-        ),
-      );
+      cartItems.add(CartItem(name: product.name, price: product.price, supplierName: product.supplierName));
     }
-
     activities.add('Added ${product.name} from ${product.supplierName} to cart');
-
     notifyListeners();
   }
 
   void completePurchase() {
     if (cartItems.isEmpty) return;
     for (final item in cartItems) {
-      supplierNotifications.add(
-        'New purchase: ${item.quantity} × ${item.name} from ${item.supplierName}',
-      );
+      supplierNotifications.add('New purchase: ${item.quantity} × ${item.name} from ${item.supplierName}');
     }
     activities.add('Purchased ${cartItems.length} product(s)');
     cartItems.clear();
@@ -508,12 +319,7 @@ class AppState extends ChangeNotifier {
     notifyListeners();
   }
 
-  void updateProfile({
-    required String name,
-    required String email,
-    required String phone,
-    required String location,
-  }) {
+  void updateProfile({required String name, required String email, required String phone, required String location}) {
     profileName = name;
     profileEmail = email;
     profilePhone = phone;
@@ -534,10 +340,7 @@ class AppState extends ChangeNotifier {
   }
 
   void removeFromCart(String name) {
-    cartItems.removeWhere(
-      (item) => item.name == name,
-    );
-
+    cartItems.removeWhere((item) => item.name == name);
     notifyListeners();
   }
 
@@ -546,6 +349,9 @@ class AppState extends ChangeNotifier {
     notifyListeners();
   }
 }
+// ============================================================
+// MODELS
+// ============================================================
 
 // ============================================================
 // MODELS
@@ -982,20 +788,15 @@ class ThemeButton extends StatelessWidget {
 // ============================================================
 // LOGIN
 // ============================================================
-
 class LoginPage extends StatefulWidget {
   const LoginPage({super.key});
-
   @override
   State<LoginPage> createState() => _LoginPageState();
 }
 
 class _LoginPageState extends State<LoginPage> {
-  final identifierController =
-      TextEditingController();
-
-  final passwordController =
-      TextEditingController();
+  final identifierController = TextEditingController();
+  final passwordController = TextEditingController();
 
   @override
   void dispose() {
@@ -1004,185 +805,57 @@ class _LoginPageState extends State<LoginPage> {
     super.dispose();
   }
 
-  void demoLogin() {
-    final t = context.read<AppState>().tr;
+  Future<void> realLogin() async {
+   final state = context.read<AppState>();
+    final email = identifierController.text.trim();
+    final password = passwordController.text;
 
-    if (identifierController.text.trim().isEmpty) {
+    if (email.isEmpty || password.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            t(
-              'Please enter your email, phone number or name.',
-            ),
-          ),
-        ),
+        SnackBar(content: Text('Please enter your email and password.')),
       );
       return;
     }
 
-    if (passwordController.text.isEmpty) {
+    showDialog(context: context, barrierDismissible: false, builder: (_) => const Center(child: CircularProgressIndicator()));
+    
+    final success = await context.read<AppState>().signInSupabase(email, password);
+    if (mounted) Navigator.pop(context);
+
+    if (success && mounted) {
+      Navigator.pushReplacement(context, MaterialPageRoute(builder: (_) => const MainNavigation()));
+    } else if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            t('Please enter your password.'),
-          ),
-        ),
+        SnackBar(content: Text('Login failed. Please check your credentials.')),
       );
-      return;
     }
-
-    context.read<AppState>().loginIdentifier =
-      identifierController.text.trim();
-
-    Navigator.push(
-      context,
-      MaterialPageRoute(
-        builder: (_) =>
-            const RoleSelectionForLoginPage(),
-      ),
-    );
   }
 
   @override
   Widget build(BuildContext context) {
     final state = context.watch<AppState>();
     final t = state.tr;
-
     return Scaffold(
       body: SafeArea(
         child: SingleChildScrollView(
           padding: const EdgeInsets.all(24),
           child: Column(
             children: [
-              Row(
-                mainAxisAlignment:
-                    MainAxisAlignment.end,
-                children: const [
-                  LanguageButton(),
-                  ThemeButton(),
-                ],
-              ),
-
+              Row(mainAxisAlignment: MainAxisAlignment.end, children: const [LanguageButton(), ThemeButton()]),
               const SizedBox(height: 20),
-
               const FixMateLogo(size: 170),
-
               const SizedBox(height: 25),
-
-              Text(
-                t('Welcome to FixMate'),
-                textAlign: TextAlign.center,
-                style: Theme.of(context)
-                    .textTheme
-                    .headlineMedium
-                    ?.copyWith(
-                      fontWeight: FontWeight.bold,
-                    ),
-              ),
-
+              Text(t('Welcome to FixMate'), textAlign: TextAlign.center, style: Theme.of(context).textTheme.headlineMedium?.copyWith(fontWeight: FontWeight.bold)),
               const SizedBox(height: 10),
-
-              Text(
-                t(
-                  'Your trusted technician marketplace',
-                ),
-                textAlign: TextAlign.center,
-                style: Theme.of(context)
-                    .textTheme
-                    .bodyLarge,
-              ),
-
+              Text(t('Your trusted technician marketplace'), textAlign: TextAlign.center),
               const SizedBox(height: 35),
-
-              TextField(
-                controller: identifierController,
-                decoration: InputDecoration(
-                  labelText: t(
-                    'Email, phone number or name',
-                  ),
-                  prefixIcon:
-                      const Icon(Icons.person_outline),
-                ),
-              ),
-
+              TextField(controller: identifierController, decoration: InputDecoration(labelText: t('Email'), prefixIcon: const Icon(Icons.person_outline))),
               const SizedBox(height: 16),
-
-              TextField(
-                controller: passwordController,
-                obscureText: true,
-                decoration: InputDecoration(
-                  labelText: t('Password'),
-                  prefixIcon:
-                      const Icon(Icons.lock_outline),
-                ),
-              ),
-
-              const SizedBox(height: 8),
-
-              Align(
-                alignment: Alignment.centerRight,
-                child: TextButton(
-                  onPressed: () {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(
-                        content: Text(
-                          t('Password reset instructions sent.'),
-                        ),
-                      ),
-                    );
-                  },
-                  child: Text(
-                    t('Forgot password?'),
-                  ),
-                ),
-              ),
-
-              const SizedBox(height: 10),
-
-              SizedBox(
-                width: double.infinity,
-                child: ElevatedButton(
-                  onPressed: demoLogin,
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor:
-                        FixMateTheme.gold,
-                    foregroundColor: Colors.white,
-                    padding:
-                        const EdgeInsets.symmetric(
-                      vertical: 16,
-                    ),
-                  ),
-                  child: Text(
-                    t('LOG IN'),
-                  ),
-                ),
-              ),
-
+              TextField(controller: passwordController, obscureText: true, decoration: InputDecoration(labelText: t('Password'), prefixIcon: const Icon(Icons.lock_outline))),
+              const SizedBox(height: 20),
+              SizedBox(width: double.infinity, child: ElevatedButton(onPressed: realLogin, style: ElevatedButton.styleFrom(backgroundColor: FixMateTheme.gold, foregroundColor: Colors.white, padding: const EdgeInsets.symmetric(vertical: 16)), child: Text(t('LOG IN')))),
               const SizedBox(height: 18),
-
-              Row(
-                mainAxisAlignment:
-                    MainAxisAlignment.center,
-                children: [
-                  Text(
-                    t("Don't have an account?"),
-                  ),
-                  TextButton(
-                    onPressed: () {
-                      Navigator.push(
-                        context,
-                        MaterialPageRoute(
-                          builder: (_) =>
-                              const SignupRoleSelectionPage(),
-                        ),
-                      );
-                    },
-                    child: Text(
-                      t('Sign up'),
-                    ),
-                  ),
-                ],
-              ),
+              Row(mainAxisAlignment: MainAxisAlignment.center, children: [Text(t("Don't have an account?")), TextButton(onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const SignupRoleSelectionPage())), child: Text(t('Sign up')))]),
             ],
           ),
         ),
@@ -1190,7 +863,6 @@ class _LoginPageState extends State<LoginPage> {
     );
   }
 }
-
 // ============================================================
 // LOGIN ROLE SELECTION
 // ============================================================
@@ -1719,40 +1391,32 @@ class _CustomerSignupPageState
     super.dispose();
   }
 
-  void register() {
+   Future<void> register() async {
     final state = context.read<AppState>();
     final t = state.tr;
-
     if (password.text != confirmPassword.text) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            t('Passwords do not match.'),
-          ),
-        ),
-      );
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(t('Passwords do not match.'))));
       return;
     }
-
-    state.login('Customer');
-    state.updateProfile(
-      name: '${firstName.text.trim()} ${lastName.text.trim()}'.trim(),
-      email: email.text.trim().isEmpty
-        ? state.profileEmail
-        : email.text.trim(),
-      phone: phone.text.trim().isEmpty
-        ? state.profilePhone
-        : phone.text.trim(),
-      location: state.profileLocation,
+    
+    showDialog(context: context, barrierDismissible: false, builder: (_) => const Center(child: CircularProgressIndicator()));
+    
+    final success = await state.signUpSupabase(
+      email: email.text.trim(),
+      password: password.text,
+      role: 'Customer',
+      fullName: '${firstName.text.trim()} ${lastName.text.trim()}',
+      phone: phone.text.trim(),
     );
+    
+    if (mounted) Navigator.pop(context); // Close loader
 
-    Navigator.pushAndRemoveUntil(
-      context,
-      MaterialPageRoute(
-        builder: (_) => const MainNavigation(),
-      ),
-      (route) => false,
-    );
+    if (success && mounted) {
+      state.login('Customer'); // Keep this to update local UI state immediately
+      Navigator.pushAndRemoveUntil(context, MaterialPageRoute(builder: (_) => const MainNavigation()), (route) => false);
+    } else if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Signup failed.')));
+    }
   }
 
   @override
@@ -1868,51 +1532,32 @@ class _TechnicianSignupPageState
     super.dispose();
   }
 
-  void register() {
+   Future<void> register() async {
     final state = context.read<AppState>();
     final t = state.tr;
-
-    if (selectedServices.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            t('Please select at least one service.'),
-          ),
-        ),
-      );
-      return;
-    }
-
     if (password.text != confirmPassword.text) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            t('Passwords do not match.'),
-          ),
-        ),
-      );
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(t('Passwords do not match.'))));
       return;
     }
-
-    state.login('Technician');
-    state.updateProfile(
-      name: '${firstName.text.trim()} ${lastName.text.trim()}'.trim(),
-      email: email.text.trim().isEmpty
-        ? state.profileEmail
-        : email.text.trim(),
-      phone: phone.text.trim().isEmpty
-        ? state.profilePhone
-        : phone.text.trim(),
-      location: state.profileLocation,
+    
+    showDialog(context: context, barrierDismissible: false, builder: (_) => const Center(child: CircularProgressIndicator()));
+    
+    final success = await state.signUpSupabase(
+      email: email.text.trim(),
+      password: password.text,
+      role: 'Customer',
+      fullName: '${firstName.text.trim()} ${lastName.text.trim()}',
+      phone: phone.text.trim(),
     );
+    
+    if (mounted) Navigator.pop(context); // Close loader
 
-    Navigator.pushAndRemoveUntil(
-      context,
-      MaterialPageRoute(
-        builder: (_) => const MainNavigation(),
-      ),
-      (route) => false,
-    );
+    if (success && mounted) {
+      state.login('Customer'); // Keep this to update local UI state immediately
+      Navigator.pushAndRemoveUntil(context, MaterialPageRoute(builder: (_) => const MainNavigation()), (route) => false);
+    } else if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Signup failed.')));
+    }
   }
 
   @override
@@ -2031,12 +1676,13 @@ class SupplierSignupPage
 
 class _SupplierSignupPageState
     extends State<SupplierSignupPage> {
+  final password = TextEditingController();
+  final confirmPassword = TextEditingController();
   final company = TextEditingController();
   final email = TextEditingController();
   final phone = TextEditingController();
   final additionalPhone =
       TextEditingController();
-
   final Set<String> selectedItems = {};
 
   final List<String> categories = [
@@ -2065,51 +1711,40 @@ class _SupplierSignupPageState
 
   @override
   void dispose() {
+    password.dispose();
+    confirmPassword.dispose();
     company.dispose();
     email.dispose();
     phone.dispose();
     additionalPhone.dispose();
     super.dispose();
+    
   }
 
-  void register() {
+    Future<void> register() async {
     final state = context.read<AppState>();
     final t = state.tr;
-
-    if (selectedItems.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            t(
-              'Please select at least one item category.',
-            ),
-          ),
-        ),
-      );
+    if (password.text != confirmPassword.text) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(t('Passwords do not match.'))));
       return;
     }
-
-    state.login('Supplier');
-    state.updateProfile(
-      name: company.text.trim().isEmpty
-        ? state.profileName
-        : company.text.trim(),
-      email: email.text.trim().isEmpty
-        ? state.profileEmail
-        : email.text.trim(),
-      phone: phone.text.trim().isEmpty
-        ? state.profilePhone
-        : phone.text.trim(),
-      location: state.profileLocation,
+    showDialog(context: context, barrierDismissible: false, builder: (_) => const Center(child: CircularProgressIndicator()));
+    
+    final success = await state.signUpSupabase(
+      email: email.text.trim(),
+      password: password.text,
+      role: 'Supplier', // Changed from Customer
+      fullName: company.text.trim().isEmpty ? 'FixMate Supplier' : company.text.trim(),
+      phone: phone.text.trim(),
     );
-
-    Navigator.pushAndRemoveUntil(
-      context,
-      MaterialPageRoute(
-        builder: (_) => const MainNavigation(),
-      ),
-      (route) => false,
-    );
+    
+    if (mounted) Navigator.pop(context);
+    if (success && mounted) {
+      state.login('Supplier');
+      Navigator.pushAndRemoveUntil(context, MaterialPageRoute(builder: (_) => const MainNavigation()), (route) => false);
+    } else if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Signup failed.')));
+    }
   }
 
   @override
@@ -2152,7 +1787,9 @@ class _SupplierSignupPageState
         ),
 
         const SizedBox(height: 10),
-
+          PasswordField(label: t('Password'), controller: password),
+          PasswordField(label: t('Confirm password'), controller: confirmPassword),
+          const SizedBox(height: 10),
         Align(
           alignment: Alignment.centerLeft,
           child: Text(
@@ -3349,31 +2986,25 @@ class _TechnicianProfilePageState
     super.dispose();
   }
 
-  void requestService() {
+   Future<void> requestService() async {
     final t = context.read<AppState>().tr;
-
     if (detailsController.text.trim().isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            t('Please describe the service you need.'),
-          ),
-        ),
-      );
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(t('Please describe the service you need.'))));
       return;
     }
-
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(
-          '${t('Service request sent successfully.')} ${t(selectedService)}',
-        ),
-      ),
+    
+    // Note: In a full DB integration, you'd pass the actual technician UUID here. 
+    // For now, we save it to the activity log and Supabase.
+    await context.read<AppState>().createServiceRequestSupabase(
+      technicianId: '00000000-0000-0000-0000-000000000000', // Replace with real ID later
+      service: selectedService,
+      description: detailsController.text.trim(),
     );
-    context.read<AppState>().recordActivity(
-          'Requested ${t(selectedService)} from ${widget.name}',
-        );
-    detailsController.clear();
+
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('${t('Service request sent successfully.')} ${t(selectedService)}')));
+      detailsController.clear();
+    }
   }
 
   @override
@@ -3868,37 +3499,24 @@ class CartPage extends StatelessWidget {
                       SizedBox(
                         width: double.infinity,
                         child: ElevatedButton(
-                          onPressed: () {
-                            if (state.cartItems
-                                .isEmpty) {
-                              ScaffoldMessenger.of(
-                                      context)
-                                  .showSnackBar(
-                                SnackBar(
-                                  content: Text(
-                                    t(
-                                      'Your cart is empty.',
-                                    ),
-                                  ),
-                                ),
-                              );
-                              return;
-                            }
+                         onPressed: () async {
+  if (state.cartItems.isEmpty) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(t('Your cart is empty.'))),
+    );
+    return;
+  }
+  showDialog(context: context, barrierDismissible: false, builder: (_) => const Center(child: CircularProgressIndicator()));
 
-                            state.completePurchase();
-
-                            ScaffoldMessenger.of(
-                                    context)
-                                .showSnackBar(
-                              SnackBar(
-                                content: Text(
-                                  t(
-                                    'Order placed! Thank you.',
-                                  ),
-                                ),
-                              ),
-                            );
-                          },
+ try{
+  Navigator.pop(context);
+ } catch (e){
+debugPrint('Error closing dialog:$e');
+ }
+  ScaffoldMessenger.of(context).showSnackBar(
+    SnackBar(content: Text(t('Order placed! Thank you.'))),
+  );
+},
                           style: ElevatedButton
                               .styleFrom(
                             backgroundColor:
@@ -4392,13 +4010,15 @@ class _EditProfilePageState extends State<EditProfilePage> {
   final passwordController = TextEditingController();
   bool showPhotoOptions = false;
 
-  Future<void> pickProfileImage(ImageSource source) async {
-    final image = await ImagePicker().pickImage(
-      source: source,
-    );
-    if (!mounted || image == null) return;
-    context.read<AppState>().updateProfileImage(await image.readAsBytes());
-  }
+Future<void> pickProfileImage(ImageSource source) async {
+  final image = await ImagePicker().pickImage(source: source);
+  if (!mounted || image == null) return;
+  
+  final bytes = await image.readAsBytes();
+  if (!mounted) return; 
+  
+  await context.read<AppState>().uploadProfileImageSupabase(bytes);
+}
 
   @override
   void initState() {
@@ -4857,20 +4477,6 @@ class _AddProductDialogState extends State<AddProductDialog> {
         TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
         FilledButton(onPressed: submit, child: const Text('POST')),
       ],
-    );
-  }
-}
-class MyApp extends StatelessWidget {
-  const MyApp({super.key});
-
-  @override
-  Widget build(BuildContext context) {
-    return MaterialApp(
-      title: 'My App',
-      home: Scaffold(
-        appBar: AppBar(title: const Text('Home')),
-        body: const Center(child: Text('Supabase is connected!')),
-      ),
     );
   }
 }

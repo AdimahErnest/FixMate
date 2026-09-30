@@ -393,13 +393,23 @@ Future<bool> signUpSupabase({
   required String fullName,
   String? phone,
   List<String>? services,
+  List<String>? categories,
+  String? additionalPhone,
 }) async {
   authError = '';
   try {
     final response = await supabase.auth.signUp(
       email: email,
       password: password,
-      data: {'role': role, 'full_name': fullName},
+      data: {
+        'role': role,
+        'full_name': fullName,
+        if (phone != null && phone.isNotEmpty) 'phone': phone,
+                'services': ?services,
+        'categories': ?categories,
+        if (additionalPhone != null && additionalPhone.isNotEmpty)
+          'additional_phone': additionalPhone,
+      },
     );
     final user = response.user;
     if (user == null) {
@@ -407,23 +417,13 @@ Future<bool> signUpSupabase({
       return false;
     }
 
+    // The database trigger has already saved the profile - and, for a
+    // Technician or Supplier, the services/categories row too - from the
+    // metadata above. This happens immediately, whether or not email
+    // confirmation is required, so there's nothing left to save here.
     if (response.session == null) {
       authError = 'Account created! Please confirm your email, then log in.';
       return false;
-    }
-
-    await supabase
-        .from('profiles')
-        .update({'phone': phone, 'location': 'Douala'})
-        .eq('id', user.id);
-    if (role == 'Technician') {
-      await supabase.from('technicians').insert({
-        'id': user.id,
-        'services': services ?? <String>[],
-      });
-    }
-    if (role == 'Supplier') {
-      await supabase.from('suppliers').insert({'id': user.id});
     }
 
     userRole = role;
@@ -653,8 +653,7 @@ Future<bool> createServiceRequestSupabase({
       'Carpentry Materials': 'Matériaux de menuiserie', 'Paint': 'Peinture', 'Welding Equipment': 'Équipement de soudage', 'Masonry Materials': 'Matériaux de maçonnerie', 'Tiles': 'Carrelage',
       'Windows & Doors': 'Fenêtres et portes', 'Auto Parts': 'Pièces automobiles', 'Home Appliances': 'Appareils électroménagers', 'Computers': 'Ordinateurs', 'IT Equipment': 'Équipement informatique',
       'Audio Equipment': 'Équipement audio', 'Electronic Components': 'Composants électroniques', 'Solar Equipment': 'Équipement solaire', 'Tools': 'Outils', 'Safety Equipment': 'Équipement de sécurité',
-      'Other': 'Autre',
-       'No products found.': 'Aucun produit trouvé.', 'My Orders': 'Mes commandes',
+      'Other': 'Autre', 'No products found.': 'Aucun produit trouvé.', 'My Orders': 'Mes commandes',
 'Sold by': 'Vendu par',
 'Your orders will appear here after checkout.': 'Vos commandes apparaîtront ici après le paiement.', 'General': 'Général', 'My Requests': 'Mes demandes', 'Orders received': 'Commandes reçues',
 'No orders yet.': 'Aucune commande pour le moment.',

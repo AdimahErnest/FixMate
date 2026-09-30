@@ -355,9 +355,11 @@ class _SupplierSignupPageState
     final success = await state.signUpSupabase(
       email: email.text.trim(),
       password: password.text,
-      role: 'Supplier', // Changed from Customer
+      role: 'Supplier',
       fullName: company.text.trim().isEmpty ? 'FixMate Supplier' : company.text.trim(),
       phone: phone.text.trim(),
+      categories: selectedItems.toList(),
+      additionalPhone: additionalPhone.text.trim(),
     );
     
     if (mounted) Navigator.pop(context);
@@ -365,7 +367,7 @@ class _SupplierSignupPageState
     
       Navigator.pushAndRemoveUntil(context, MaterialPageRoute(builder: (_) => const MainNavigation()), (route) => false);
     } else if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Signup failed.')));
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(t(state.authError))));
     }
   }
 

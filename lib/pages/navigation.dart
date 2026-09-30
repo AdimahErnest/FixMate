@@ -1,13 +1,12 @@
 // FixMate — bottom navigation shell shown after login
-
+import 'subscription.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../app_state.dart';
 import 'admin_dashboard.dart';
 import 'home.dart';
 import 'technicians.dart';
-import 'shop.dart';
-import 'subscription.dart';
+import 'shop.dart'; 
 import 'profile.dart';
 
 class MainNavigation extends StatefulWidget {
@@ -31,18 +30,18 @@ class _MainNavigationState
     final isAdmin = state.userRole == 'Admin';
 
     final pages = isAdmin
-        ? const [
+        ?  [
             AdminDashboardPage(),
             ProfilePage(),
           ]
         : isBusinessRole
-          ? const [
+          ?  [
               HomePage(),
               ShopPage(),
               SubscriptionPage(),
               ProfilePage(),
             ]
-          : const [
+          :  [
               HomePage(),
               TechniciansPage(),
               ShopPage(),

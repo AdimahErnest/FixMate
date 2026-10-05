@@ -1,5 +1,4 @@
 // FixMate — Admin role dashboard (static demo data)
-
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../app_state.dart';

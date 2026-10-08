@@ -12,6 +12,29 @@ flutter run --dart-define=FIXMATE_API_URL=https://api.example.com
 
 Email/password sign-in continues to use Supabase directly. Phone/password sign-in uses the API to resolve a unique Cameroon phone number to its account; Supabase still verifies the password and issues the user's normal session.
 
+## Build for iPhone
+
+The repository includes the Flutter iOS runner and iPhone app icon assets. Building or signing an iOS app requires macOS with Xcode; iOS apps cannot be compiled or signed from this Windows development environment.
+
+On a Mac with Flutter and Xcode installed:
+
+1. Open `ios/Runner.xcworkspace` in Xcode, select the **Runner** target, and set **Signing & Capabilities → Team** to your Apple developer team.
+2. Replace the example bundle identifier `com.example.fixmate` in the Runner target's **Signing & Capabilities** with a unique identifier registered to your Apple developer account.
+3. From the repository root, fetch packages and run on a connected iPhone or iOS simulator:
+
+   ```sh
+   flutter pub get
+   flutter run -d <device-id> --dart-define=FIXMATE_API_URL=https://your-deployed-api.example.com
+   ```
+
+4. To build a signed release archive for distribution, use Xcode's **Product → Archive**. For an unsigned release build to inspect or archive with Xcode later:
+
+   ```sh
+   flutter build ios --release --dart-define=FIXMATE_API_URL=https://your-deployed-api.example.com
+   ```
+
+The deployed API URL must use HTTPS. App Store or TestFlight distribution also requires Apple Developer account access and valid signing/provisioning; set up App Store Connect listing, privacy disclosures, and review requirements before submission. The app asks iPhone users for photo-library access when suppliers select product photos.
+
 ## Run the API
 
 Use Node.js 18 or newer. Use `.env.example` as a list of the settings to add to your hosting provider's secret/environment configuration, then start the server with `npm start`. The server does not load `.env` files automatically. Never commit real credentials.

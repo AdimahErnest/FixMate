@@ -4,12 +4,13 @@ import 'package:flutter/material.dart';
 class FixMateTheme {
   static const Color gold = Color(0xFFB58A3A);
   static const Color darkGold = Color(0xFF8D6828);
+  static const Color lightBackground = Color(0xFFF1F0E9);
   static const Color darkBackground = Color(0xFF101010);
   static const Color darkCard = Color(0xFF1B1B1B);
 
   static ThemeData lightTheme = ThemeData(
     useMaterial3: true,
-    scaffoldBackgroundColor: const Color(0xFFFAF8F3),
+    scaffoldBackgroundColor: lightBackground,
     colorScheme: ColorScheme.fromSeed(
       seedColor: gold,
       brightness: Brightness.light,
@@ -18,7 +19,7 @@ class FixMateTheme {
       onPrimary: Colors.white,
       primaryContainer: const Color(0xFFF2E7D1),
       onPrimaryContainer: const Color(0xFF39270C),
-      surface: const Color(0xFFFAF8F3),
+      surface: lightBackground,
     ),
     textTheme: Typography.material2021().black.apply(
           bodyColor: const Color(0xFF292820),

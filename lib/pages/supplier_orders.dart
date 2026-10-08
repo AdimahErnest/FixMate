@@ -5,6 +5,7 @@ import 'package:provider/provider.dart';
 import '../app_state.dart';
 import '../theme.dart';
 import '../widgets/common.dart';
+import 'subscription.dart';
 
 class SupplierOrdersPage extends StatefulWidget {
   const SupplierOrdersPage({super.key});
@@ -106,9 +107,13 @@ class _SupplierOrdersPageState extends State<SupplierOrdersPage> {
     if (!mounted) return;
     setState(() => busyId = null);
 
-    messenger.showSnackBar(SnackBar(
-      content: Text(ok ? t('Item updated.') : t('Could not update the item.')),
-    ));
+    messenger.showSnackBar(
+      SnackBar(
+        content: Text(
+          ok ? t('Item updated.') : t('Could not update the item.'),
+        ),
+      ),
+    );
   }
 
   Future<void> declineItem(SupplierOrderItem item) async {
@@ -121,12 +126,18 @@ class _SupplierOrdersPageState extends State<SupplierOrdersPage> {
   Widget buildCard(SupplierOrderItem item, String Function(String) t) {
     final busy = busyId == item.id;
     final color = statusColor(item.status);
-    final showContact = item.status != 'pending' &&
+    final showContact =
+        item.status != 'pending' &&
         item.status != 'cancelled' &&
         item.customerPhone.isNotEmpty;
 
     Widget? actions;
-    if (item.status == 'pending') {
+    if (item.paymentStatus != 'paid') {
+      actions = Padding(
+        padding: const EdgeInsets.only(top: 4),
+        child: Text(t('Awaiting customer payment.')),
+      );
+    } else if (item.status == 'pending') {
       actions = Row(
         children: [
           Expanded(
@@ -161,6 +172,24 @@ class _SupplierOrdersPageState extends State<SupplierOrdersPage> {
         ),
       );
     }
+    final state = context.read<AppState>();
+    if (state.userRole == 'Supplier' &&
+        !state.hasActiveBusinessSubscription &&
+        actions != null) {
+      actions = Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          const Text('An active subscription is required to manage orders.'),
+          TextButton(
+            onPressed: () => Navigator.push(
+              context,
+              MaterialPageRoute(builder: (_) => const SubscriptionPage()),
+            ),
+            child: const Text('View subscription plans'),
+          ),
+        ],
+      );
+    }
 
     return Card(
       margin: const EdgeInsets.only(bottom: 14),
@@ -181,7 +210,10 @@ class _SupplierOrdersPageState extends State<SupplierOrdersPage> {
                   ),
                 ),
                 Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 10,
+                    vertical: 4,
+                  ),
                   decoration: BoxDecoration(
                     color: color.withValues(alpha: .15),
                     borderRadius: BorderRadius.circular(20),
@@ -209,7 +241,11 @@ class _SupplierOrdersPageState extends State<SupplierOrdersPage> {
             const SizedBox(height: 10),
             Row(
               children: [
-                const Icon(Icons.person_outline, size: 18, color: FixMateTheme.gold),
+                const Icon(
+                  Icons.person_outline,
+                  size: 18,
+                  color: FixMateTheme.gold,
+                ),
                 const SizedBox(width: 6),
                 Expanded(child: Text(item.customerName)),
               ],
@@ -218,7 +254,11 @@ class _SupplierOrdersPageState extends State<SupplierOrdersPage> {
               const SizedBox(height: 6),
               Row(
                 children: [
-                  const Icon(Icons.phone_outlined, size: 18, color: FixMateTheme.gold),
+                  const Icon(
+                    Icons.phone_outlined,
+                    size: 18,
+                    color: FixMateTheme.gold,
+                  ),
                   const SizedBox(width: 6),
                   Expanded(child: SelectableText(item.customerPhone)),
                 ],
@@ -227,7 +267,11 @@ class _SupplierOrdersPageState extends State<SupplierOrdersPage> {
             const SizedBox(height: 6),
             Row(
               children: [
-                const Icon(Icons.payments_outlined, size: 18, color: FixMateTheme.gold),
+                const Icon(
+                  Icons.payments_outlined,
+                  size: 18,
+                  color: FixMateTheme.gold,
+                ),
                 const SizedBox(width: 6),
                 Text('${t('Payment')}: ${paymentLabel(item.paymentStatus, t)}'),
               ],
@@ -237,10 +281,7 @@ class _SupplierOrdersPageState extends State<SupplierOrdersPage> {
               formatDate(item.createdAt),
               style: Theme.of(context).textTheme.bodySmall,
             ),
-            if (actions != null) ...[
-              const SizedBox(height: 14),
-              actions,
-            ],
+            if (actions != null) ...[const SizedBox(height: 14), actions],
           ],
         ),
       ),
@@ -273,38 +314,51 @@ class _SupplierOrdersPageState extends State<SupplierOrdersPage> {
 
     final children = <Widget>[];
     if (state.supplierOrdersLoading && items.isEmpty) {
-      children.add(const Padding(
-        padding: EdgeInsets.all(40),
-        child: Center(child: CircularProgressIndicator()),
-      ));
+      children.add(
+        const Padding(
+          padding: EdgeInsets.all(40),
+          child: Center(child: CircularProgressIndicator()),
+        ),
+      );
     } else if (state.supplierOrdersFailed && items.isEmpty) {
-      children.add(Padding(
-        padding: const EdgeInsets.all(30),
-        child: Column(
-          children: [
-            Text(t('Could not load orders.')),
-            const SizedBox(height: 12),
-            OutlinedButton(
-              onPressed: state.loadSupplierOrders,
-              child: Text(t('Retry')),
-            ),
-          ],
+      children.add(
+        Padding(
+          padding: const EdgeInsets.all(30),
+          child: Column(
+            children: [
+              Text(t('Could not load orders.')),
+              const SizedBox(height: 12),
+              OutlinedButton(
+                onPressed: state.loadSupplierOrders,
+                child: Text(t('Retry')),
+              ),
+            ],
+          ),
         ),
-      ));
+      );
     } else if (items.isEmpty) {
-      children.add(Padding(
-        padding: const EdgeInsets.all(40),
-        child: Column(
-          children: [
-            const Icon(Icons.inventory_2_outlined, size: 70, color: FixMateTheme.gold),
-            const SizedBox(height: 16),
-            Text(
-              t('No orders yet.'),
-              style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
-            ),
-          ],
+      children.add(
+        Padding(
+          padding: const EdgeInsets.all(40),
+          child: Column(
+            children: [
+              const Icon(
+                Icons.inventory_2_outlined,
+                size: 70,
+                color: FixMateTheme.gold,
+              ),
+              const SizedBox(height: 16),
+              Text(
+                t('No orders yet.'),
+                style: const TextStyle(
+                  fontSize: 18,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+            ],
+          ),
         ),
-      ));
+      );
     } else {
       children.addAll(items.map((item) => buildCard(item, t)));
     }

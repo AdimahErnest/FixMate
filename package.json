@@ -2,13 +2,14 @@
   "name": "fixmate",
   "version": "1.0.0",
   "description": "A new Flutter project.",
-  "main": "index.js",
+  "main": "server.js",
   "directories": {
     "lib": "lib",
     "test": "test"
   },
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "start": "node server.js",
+    "test": "node --test"
   },
   "keywords": [],
   "author": "",
@@ -16,5 +17,8 @@
   "type": "commonjs",
   "dependencies": {
     "express": "^5.2.1"
+  },
+  "engines": {
+    "node": ">=18"
   }
 }

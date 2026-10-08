@@ -11,6 +11,7 @@ import 'login.dart';
 import 'requests.dart';
 import 'supplier_orders.dart';
 import 'my_orders.dart';
+import 'notifications.dart';
 
 class ProfilePage extends StatelessWidget {
   const ProfilePage({super.key});
@@ -82,6 +83,22 @@ class ProfilePage extends StatelessWidget {
               ),
             ),
 
+            const SizedBox(height: 10),
+            SizedBox(
+              width: double.infinity,
+              child: FilledButton.tonalIcon(
+                onPressed: () => Navigator.push(
+                  context,
+                  MaterialPageRoute(builder: (_) => const NotificationsPage()),
+                ),
+                icon: Badge(
+                  isLabelVisible: state.unreadNotificationCount > 0,
+                  label: Text('${state.unreadNotificationCount}'),
+                  child: const Icon(Icons.notifications_outlined),
+                ),
+                label: Text(t('Notifications')),
+              ),
+            ),
             const SizedBox(height: 10),
              if (state.userRole == 'Customer' || state.userRole == 'Technician') ...[
   SizedBox(
@@ -186,7 +203,14 @@ class AccountDetails extends StatelessWidget {
             _detailRow(Icons.email_outlined, 'Email', state.profileEmail),
             _detailRow(Icons.phone_outlined, 'Tel', state.profilePhone),
             _detailRow(Icons.location_on_outlined, 'Location', state.profileLocation),
-            _detailRow(Icons.star_outline, 'My ratings', state.profileRating.toString()),
+            if (state.userRole == 'Technician' || state.userRole == 'Supplier')
+              _detailRow(
+                Icons.star_outline,
+                'My ratings',
+                state.profileRatingCount == 0
+                    ? 'No ratings yet'
+                    : '${state.profileRating.toStringAsFixed(1)} (${state.profileRatingCount})',
+              ),
           ],
         ),
       ),

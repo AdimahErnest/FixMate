@@ -363,7 +363,9 @@ class _TechnicianProfilePageState extends State<TechnicianProfilePage> {
   Widget build(BuildContext context) {
     final t = context.watch<AppState>().tr;
     final image = tech.image;
-    final ratingText = tech.rating > 0 ? '${tech.rating} ★' : t('New');
+    final ratingText = tech.rating > 0
+        ? '${tech.rating.toStringAsFixed(1)} (${tech.ratingCount}) ★'
+        : t('New');
 
     return Scaffold(
       appBar: AppBar(

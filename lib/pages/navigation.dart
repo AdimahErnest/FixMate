@@ -6,53 +6,48 @@ import '../app_state.dart';
 import 'admin_dashboard.dart';
 import 'home.dart';
 import 'technicians.dart';
-import 'shop.dart'; 
+import 'shop.dart';
 import 'profile.dart';
 
 class MainNavigation extends StatefulWidget {
   const MainNavigation({super.key});
 
   @override
-  State<MainNavigation> createState() =>
-      _MainNavigationState();
+  State<MainNavigation> createState() => _MainNavigationState();
 }
 
-class _MainNavigationState
-    extends State<MainNavigation> {
+class _MainNavigationState extends State<MainNavigation> {
   int currentIndex = 0;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) context.read<AppState>().startNotificationStream();
+    });
+  }
+
+  @override
+  void dispose() {
+    context.read<AppState>().stopNotificationStream();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
     final state = context.watch<AppState>();
     final isBusinessRole =
-        state.userRole == 'Technician' ||
-        state.userRole == 'Supplier';
+        state.userRole == 'Technician' || state.userRole == 'Supplier';
     final isAdmin = state.userRole == 'Admin';
 
     final pages = isAdmin
-        ?  [
-            AdminDashboardPage(),
-            ProfilePage(),
-          ]
+        ? [AdminDashboardPage(), ProfilePage()]
         : isBusinessRole
-          ?  [
-              HomePage(),
-              ShopPage(),
-              SubscriptionPage(),
-              ProfilePage(),
-            ]
-          :  [
-              HomePage(),
-              TechniciansPage(),
-              ShopPage(),
-              ProfilePage(),
-            ];
+        ? [HomePage(), ShopPage(), SubscriptionPage(), ProfilePage()]
+        : [HomePage(), TechniciansPage(), ShopPage(), ProfilePage()];
 
     return Scaffold(
-      body: IndexedStack(
-        index: currentIndex,
-        children: pages,
-      ),
+      body: IndexedStack(index: currentIndex, children: pages),
       bottomNavigationBar: FixMateBottomNavigation(
         currentIndex: currentIndex,
         isBusinessRole: isBusinessRole,
@@ -67,9 +62,7 @@ class _MainNavigationState
   }
 }
 
-
-class FixMateBottomNavigation
-    extends StatelessWidget {
+class FixMateBottomNavigation extends StatelessWidget {
   final int currentIndex;
   final bool isBusinessRole;
   final bool isAdmin;
@@ -88,75 +81,43 @@ class FixMateBottomNavigation
     final t = context.watch<AppState>().tr;
 
     final labels = isAdmin
-        ? [
-            t('Dashboard'),
-            t('Profile'),
-          ]
+        ? [t('Dashboard'), t('Profile')]
         : isBusinessRole
-          ? [
-              t('Home'),
-              t('Shop'),
-              t('Subscription'),
-              t('Profile'),
-            ]
-          : [
-              t('Home'),
-              t('Technicians'),
-              t('Shop'),
-              t('Profile'),
-            ];
+        ? [t('Home'), t('Shop'), t('Subscription'), t('Profile')]
+        : [t('Home'), t('Technicians'), t('Shop'), t('Profile')];
 
     final icons = isAdmin
+        ? [Icons.dashboard_outlined, Icons.person_outline]
+        : isBusinessRole
         ? [
-            Icons.dashboard_outlined,
+            Icons.home_outlined,
+            Icons.shopping_bag_outlined,
+            Icons.card_membership_outlined,
             Icons.person_outline,
           ]
-        : isBusinessRole
-          ? [
-              Icons.home_outlined,
-              Icons.shopping_bag_outlined,
-              Icons.card_membership_outlined,
-              Icons.person_outline,
-            ]
-          : [
-              Icons.home_outlined,
-              Icons.handyman_outlined,
-              Icons.shopping_bag_outlined,
-              Icons.person_outline,
-            ];
+        : [
+            Icons.home_outlined,
+            Icons.handyman_outlined,
+            Icons.shopping_bag_outlined,
+            Icons.person_outline,
+          ];
 
     final selectedIcons = isAdmin
-        ? [
-            Icons.dashboard,
-            Icons.person,
-          ]
+        ? [Icons.dashboard, Icons.person]
         : isBusinessRole
-          ? [
-              Icons.home,
-              Icons.shopping_bag,
-              Icons.card_membership,
-              Icons.person,
-            ]
-          : [
-              Icons.home,
-              Icons.handyman,
-              Icons.shopping_bag,
-              Icons.person,
-            ];
+        ? [Icons.home, Icons.shopping_bag, Icons.card_membership, Icons.person]
+        : [Icons.home, Icons.handyman, Icons.shopping_bag, Icons.person];
 
     return NavigationBar(
       selectedIndex: currentIndex,
       onDestinationSelected: onChanged,
-      destinations: List.generate(
-        labels.length,
-        (index) {
-          return NavigationDestination(
-            icon: Icon(icons[index]),
-            selectedIcon: Icon(selectedIcons[index]),
-            label: labels[index],
-          );
-        },
-      ),
+      destinations: List.generate(labels.length, (index) {
+        return NavigationDestination(
+          icon: Icon(icons[index]),
+          selectedIcon: Icon(selectedIcons[index]),
+          label: labels[index],
+        );
+      }),
     );
   }
 }

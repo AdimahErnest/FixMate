@@ -157,12 +157,14 @@ class FixMateAppBar extends StatefulWidget implements PreferredSizeWidget {
   final String title;
   final List<String> suggestions;
   final ValueChanged<String>? onSearchChanged;
+  final List<Widget> actions;
 
   const FixMateAppBar({
     super.key,
     required this.title,
     this.suggestions = const [],
     this.onSearchChanged,
+    this.actions = const [],
   });
 
   @override
@@ -214,6 +216,7 @@ class _FixMateAppBarState extends State<FixMateAppBar> {
             )
           : Text(widget.title),
       actions: [
+        ...widget.actions,
         if (canSearch)
           IconButton(
             onPressed: toggleSearch,

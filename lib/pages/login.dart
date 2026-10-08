@@ -31,12 +31,12 @@ class _LoginPageState extends State<LoginPage> {
   final t = state.tr;
   final messenger = ScaffoldMessenger.of(context);
   final navigator = Navigator.of(context);
-  final email = identifierController.text.trim();
+  final identifier = identifierController.text.trim();
   final password = passwordController.text;
 
-  if (email.isEmpty || password.isEmpty) {
+  if (identifier.isEmpty || password.isEmpty) {
     messenger.showSnackBar(
-      SnackBar(content: Text(t('Please enter your email and password.'))),
+      SnackBar(content: Text(t('Please enter your email or phone number and password.'))),
     );
     return;
   }
@@ -47,7 +47,7 @@ class _LoginPageState extends State<LoginPage> {
     builder: (_) => const Center(child: CircularProgressIndicator()),
   );
 
-  final success = await state.signInSupabase(email, password);
+  final success = await state.signInSupabase(identifier, password);
   if (!mounted) return;
   navigator.pop(); // close loader
 
@@ -78,7 +78,14 @@ class _LoginPageState extends State<LoginPage> {
               const SizedBox(height: 10),
               Text(t('Your trusted technician marketplace'), textAlign: TextAlign.center),
               const SizedBox(height: 35),
-              TextField(controller: identifierController, decoration: InputDecoration(labelText: t('Email'), prefixIcon: const Icon(Icons.person_outline))),
+              TextField(
+                controller: identifierController,
+                keyboardType: TextInputType.emailAddress,
+                decoration: InputDecoration(
+                  labelText: t('Email or phone number'),
+                  prefixIcon: const Icon(Icons.person_outline),
+                ),
+              ),
               const SizedBox(height: 16),
               TextField(controller: passwordController, obscureText: true, decoration: InputDecoration(labelText: t('Password'), prefixIcon: const Icon(Icons.lock_outline))),
               Align(
@@ -88,7 +95,9 @@ class _LoginPageState extends State<LoginPage> {
       context,
       MaterialPageRoute(
         builder: (_) => ForgotPasswordPage(
-          initialEmail: identifierController.text.trim(),
+          initialEmail: identifierController.text.trim().contains('@')
+              ? identifierController.text.trim()
+              : '',
         ),
       ),
     ),

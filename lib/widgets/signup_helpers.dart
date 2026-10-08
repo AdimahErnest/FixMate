@@ -6,6 +6,50 @@ import '../app_state.dart';
 import '../theme.dart';
 import 'common.dart';
 
+String? validateSignupFields({
+  required String name,
+  required String email,
+  required String phone,
+  required String password,
+  required String confirmPassword,
+  String? additionalPhone,
+}) {
+  if (name.trim().isEmpty) return 'Please enter your name.';
+  if (!RegExp(r'^[^@\s]+@[^@\s]+\.[^@\s]+$')
+      .hasMatch(email.trim())) {
+    return 'Please enter a valid email address.';
+  }
+  if (normalizeSignupPhone(phone) == null) {
+    return 'Enter a valid Cameroon phone number.';
+  }
+  if (additionalPhone != null &&
+      additionalPhone.trim().isNotEmpty &&
+      normalizeSignupPhone(additionalPhone) == null) {
+    return 'Enter a valid additional phone number.';
+  }
+  if (!isStrongSignupPassword(password)) {
+    return 'Use at least 8 characters with uppercase, lowercase, and a number.';
+  }
+  if (password != confirmPassword) return 'Passwords do not match.';
+  return null;
+}
+
+bool isStrongSignupPassword(String password) =>
+    password.length >= 8 &&
+    RegExp(r'[A-Z]').hasMatch(password) &&
+    RegExp(r'[a-z]').hasMatch(password) &&
+    RegExp(r'[0-9]').hasMatch(password);
+
+String? normalizeSignupPhone(String value) {
+  var digits = value.replaceAll(RegExp(r'\D'), '');
+  if (digits.startsWith('237') && digits.length == 12) {
+    digits = digits.substring(3);
+  } else if (digits.startsWith('0') && digits.length == 10) {
+    digits = digits.substring(1);
+  }
+  return RegExp(r'^[26]\d{8}$').hasMatch(digits) ? digits : null;
+}
+
 class SignupScaffold extends StatelessWidget {
   final String title;
   final List<Widget> children;

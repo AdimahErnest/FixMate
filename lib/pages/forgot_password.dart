@@ -5,6 +5,7 @@ import 'package:provider/provider.dart';
 import '../app_state.dart';
 import '../theme.dart';
 import '../widgets/common.dart';
+import '../widgets/signup_helpers.dart';
 
 class ForgotPasswordPage extends StatefulWidget {
   final String initialEmail;
@@ -47,13 +48,13 @@ class _ForgotPasswordPageState extends State<ForgotPasswordPage> {
     final t = state.tr;
     final email = emailController.text.trim();
 
-    if (!email.contains('@')) {
+    if (!RegExp(r'^[^@\s]+@[^@\s]+\.[^@\s]+$').hasMatch(email)) {
       showMessage(t('Please enter a valid email address.'));
       return;
     }
 
     setState(() => busy = true);
-    final ok = await state.sendPasswordResetCode(email);
+    final ok = await state.sendPasswordResetCode(email.toLowerCase());
     if (!mounted) return;
     setState(() {
       busy = false;
@@ -76,8 +77,10 @@ class _ForgotPasswordPageState extends State<ForgotPasswordPage> {
       showMessage(t('Please enter the code from your email.'));
       return;
     }
-    if (newPassword.length < 6) {
-      showMessage(t('Password must be at least 6 characters.'));
+    if (!isStrongSignupPassword(newPassword)) {
+      showMessage(
+        t('Use at least 8 characters with uppercase, lowercase, and a number.'),
+      );
       return;
     }
     if (newPassword != confirmController.text) {
@@ -87,7 +90,7 @@ class _ForgotPasswordPageState extends State<ForgotPasswordPage> {
 
     setState(() => busy = true);
     final ok = await state.resetPasswordWithCode(
-      email: emailController.text.trim(),
+      email: emailController.text.trim().toLowerCase(),
       code: code,
       newPassword: newPassword,
     );

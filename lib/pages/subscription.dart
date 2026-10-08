@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'package:url_launcher/url_launcher.dart';
 import '../app_state.dart';
 import '../services/fapshi_service.dart';
 
@@ -12,172 +13,158 @@ class SubscriptionPage extends StatefulWidget {
 
 class _SubscriptionPageState extends State<SubscriptionPage> {
   final FapshiService _fapshiService = FapshiService();
-  String _selectedPlan = 'monthly'; // 'monthly' or 'yearly'
-  String _selectedMedium = 'mobile money'; // 'mobile money' (MTN) or 'orange money'
-  final TextEditingController _phoneController = TextEditingController();
+  String _selectedPlan = 'monthly';
+  String? _pendingTransactionId;
+  Uri? _pendingPaymentLink;
+  String? _paymentStatusMessage;
+  DateTime? _lastStatusCheck;
   bool _isLoading = false;
 
   @override
-  void dispose() {
-    _phoneController.dispose();
-    super.dispose();
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) context.read<AppState>().loadBusinessSubscription();
+    });
   }
 
-  void _showPaymentSheet(int amount, String planName) {
-    showModalBottomSheet(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: Colors.grey[900], // Match your dark theme
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-      ),
-      builder: (context) {
-        return Padding(
-          padding: EdgeInsets.only(
-            bottom: MediaQuery.of(context).viewInsets.bottom,
-            left: 20, right: 20, top: 20,
-          ),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              const Text('Complete Payment', style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Colors.white)),
-              const SizedBox(height: 20),
-              
-              // Phone Input
-              TextField(
-                controller: _phoneController,
-                keyboardType: TextInputType.phone,
-                style: const TextStyle(color: Colors.white),
-                decoration: InputDecoration(
-                  labelText: 'Phone Number (e.g., 67XXXXXXX)',
-                  labelStyle: const TextStyle(color: Colors.grey),
-                  filled: true,
-                  fillColor: Colors.grey[800],
-                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
-                ),
-              ),
-              const SizedBox(height: 20),
-
-              // Network Selection
-              const Text('Select Network:', style: TextStyle(color: Colors.white, fontSize: 16)),
-              const SizedBox(height: 10),
-              Row(
-                children: [
-                  Expanded(
-                    child: ChoiceChip(
-                      label: const Text('MTN Mobile Money', style: TextStyle(color: Colors.white)),
-                      selected: _selectedMedium == 'mobile money',
-                      selectedColor: Colors.yellow[700],
-                      backgroundColor: Colors.grey[800],
-                      onSelected: (selected) {
-                        setState(() => _selectedMedium = 'mobile money');
-                      },
-                    ),
-                  ),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: ChoiceChip(
-                      label: const Text('Orange Money', style: TextStyle(color: Colors.white)),
-                      selected: _selectedMedium == 'orange money',
-                      selectedColor: Colors.orange,
-                      backgroundColor: Colors.grey[800],
-                      onSelected: (selected) {
-                        setState(() => _selectedMedium = 'orange money');
-                      },
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 30),
-
-              // Pay Button
-              SizedBox(
-                width: double.infinity,
-                child: ElevatedButton(
-                  onPressed: _isLoading ? null : () => _processDirectPayment(amount, planName),
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: Colors.blue,
-                    padding: const EdgeInsets.symmetric(vertical: 15),
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                  ),
-                  child: _isLoading 
-                    ? const CircularProgressIndicator(color: Colors.white) 
-                    : Text('Pay $amount FCFA', style: const TextStyle(fontSize: 16, color: Colors.white)),
-                ),
-              ),
-              const SizedBox(height: 20),
-            ],
-          ),
-        );
-      },
-    );
+  Future<void> _startPayment() async {
+    setState(() => _isLoading = true);
+    try {
+      final checkout = await _fapshiService.createSubscriptionCheckout(
+        _selectedPlan,
+      );
+      if (!mounted) return;
+      setState(() {
+        _pendingTransactionId = checkout.transId;
+        _pendingPaymentLink = checkout.link;
+        _paymentStatusMessage =
+            'Complete payment in the secure checkout, then check its status here.';
+      });
+      await _openCheckout();
+    } on FapshiException catch (error) {
+      _showMessage(error.message);
+    } finally {
+      if (mounted) setState(() => _isLoading = false);
+    }
   }
 
-  Future<void> _processDirectPayment(int amount, String planName) async {
-    final phone = _phoneController.text.trim();
-    if (phone.isEmpty || phone.length < 9) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Please enter a valid phone number')));
+  Future<void> _openCheckout() async {
+    final link = _pendingPaymentLink;
+    if (link == null) return;
+    try {
+      final opened = await launchUrl(
+        link,
+        mode: LaunchMode.externalApplication,
+      );
+      if (!opened && mounted) {
+        _showMessage('Could not open the secure Fapshi checkout.');
+      }
+    } catch (_) {
+      if (mounted) _showMessage('Could not open the secure Fapshi checkout.');
+    }
+  }
+
+  Future<void> _checkPaymentStatus() async {
+    final transId = _pendingTransactionId;
+    if (transId == null) return;
+    final now = DateTime.now();
+    final lastCheck = _lastStatusCheck;
+    if (lastCheck != null &&
+        now.difference(lastCheck) < const Duration(seconds: 11)) {
+      _showMessage('Please wait a few seconds before checking again.');
       return;
     }
 
-    setState(() => _isLoading = true);
-
-    final result = await _fapshiService.directPayment(
-      amount: amount,
-      phone: phone,
-      medium: _selectedMedium,
-      externalId: 'SUB_${DateTime.now().millisecondsSinceEpoch}',
-      message: '$planName Subscription - FixMate',
-    );
-    if (!mounted) return;
-
-    setState(() => _isLoading = false);
-
-    if (result != null) {
-      Navigator.pop(context); // Close bottom sheet
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Payment prompt sent to $phone. Please check your phone to complete the $planName subscription.'),
-          backgroundColor: Colors.green,
-          duration: const Duration(seconds: 5),
-        ),
-      );
-    } else {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Failed to initiate payment. Please try again.'), backgroundColor: Colors.red),
-      );
+    setState(() {
+      _isLoading = true;
+      _lastStatusCheck = now;
+    });
+    try {
+      final status = await _fapshiService.checkSubscriptionStatus(transId);
+      if (!mounted) return;
+      setState(() {
+        _paymentStatusMessage = switch (status) {
+          'active' => 'Payment confirmed. Your subscription is active.',
+          'failed' => 'Payment failed. You can start a new payment.',
+          'expired' =>
+            'This payment link expired. Start a new payment to subscribe.',
+          _ => 'Payment is still pending. Complete checkout, then check again.',
+        };
+        if (status == 'active') _pendingPaymentLink = null;
+        if (status == 'failed' || status == 'expired') {
+          _pendingTransactionId = null;
+          _pendingPaymentLink = null;
+        }
+      });
+      if (status == 'active') {
+        await context.read<AppState>().loadBusinessSubscription();
+      }
+    } on FapshiException catch (error) {
+      if (mounted) _showMessage(error.message);
+    } finally {
+      if (mounted) setState(() => _isLoading = false);
     }
+  }
+
+  void _showMessage(String message) {
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(SnackBar(content: Text(message)));
   }
 
   @override
   Widget build(BuildContext context) {
     final state = context.watch<AppState>();
     final isSupplier = state.userRole == 'Supplier';
-    
-    // Define prices based on role
-    final monthlyPrice = isSupplier ? 20000 : 5000;
-    final yearlyPrice = isSupplier ? 200000 : 50000;
+    final monthlyPrice = isSupplier ? 34 : 9;
+    final yearlyPrice = isSupplier ? 340 : 90;
 
     return Scaffold(
       appBar: AppBar(title: const Text('Subscription Plans')),
       body: Padding(
-        padding: const EdgeInsets.all(20.0),
+        padding: const EdgeInsets.all(20),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(
               'Choose your plan',
-              style: Theme.of(context).textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.bold),
+              style: Theme.of(
+                context,
+              ).textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.bold),
             ),
             const SizedBox(height: 10),
             Text(
-              isSupplier ? 'Supplier Account Pricing' : 'Technician Account Pricing',
-              style: TextStyle(color: Colors.grey[400]),
+              isSupplier
+                  ? 'Supplier Account Pricing (USD)'
+                  : 'Technician Account Pricing (USD)',
+              style: TextStyle(color: Colors.grey[600]),
             ),
-            const SizedBox(height: 30),
-
-            // Monthly Plan Card
+            const SizedBox(height: 12),
+            if (state.subscriptionLoading)
+              const LinearProgressIndicator()
+            else if (state.subscriptionLoadFailed)
+              Row(
+                children: [
+                  const Expanded(
+                    child: Text('Could not check your subscription status.'),
+                  ),
+                  TextButton(
+                    onPressed: state.loadBusinessSubscription,
+                    child: const Text('Retry'),
+                  ),
+                ],
+              )
+            else if (state.hasActiveBusinessSubscription)
+              Text(
+                'Subscription active until ${state.subscriptionExpiresAt!.toLocal().toString().split(' ').first}.',
+                style: const TextStyle(color: Colors.green),
+              )
+            else
+              const Text(
+                'An active subscription is required to publish products or manage service work.',
+              ),
+            const SizedBox(height: 24),
             _buildPlanCard(
               title: 'Monthly Plan',
               price: monthlyPrice,
@@ -185,9 +172,7 @@ class _SubscriptionPageState extends State<SubscriptionPage> {
               isSelected: _selectedPlan == 'monthly',
               onTap: () => setState(() => _selectedPlan = 'monthly'),
             ),
-            const SizedBox(height: 20),
-
-            // Yearly Plan Card
+            const SizedBox(height: 16),
             _buildPlanCard(
               title: 'Yearly Plan',
               price: yearlyPrice,
@@ -196,22 +181,61 @@ class _SubscriptionPageState extends State<SubscriptionPage> {
               onTap: () => setState(() => _selectedPlan = 'yearly'),
               badge: 'Save 17%',
             ),
+            if (_paymentStatusMessage != null) ...[
+              const SizedBox(height: 20),
+              Card(
+                child: Padding(
+                  padding: const EdgeInsets.all(16),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      Text(_paymentStatusMessage!),
+                      if (_pendingTransactionId != null) ...[
+                        const SizedBox(height: 12),
+                        if (_pendingPaymentLink != null)
+                          OutlinedButton(
+                            onPressed: _isLoading ? null : _openCheckout,
+                            child: const Text('Open checkout'),
+                          ),
+                        FilledButton(
+                          onPressed: _isLoading ? null : _checkPaymentStatus,
+                          child: _isLoading
+                              ? const SizedBox(
+                                  height: 18,
+                                  width: 18,
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 2,
+                                  ),
+                                )
+                              : const Text('Check payment status'),
+                        ),
+                      ],
+                    ],
+                  ),
+                ),
+              ),
+            ],
             const Spacer(),
-
-            // Proceed Button
             SizedBox(
               width: double.infinity,
               child: ElevatedButton(
-                onPressed: () {
-                  final amount = _selectedPlan == 'monthly' ? monthlyPrice : yearlyPrice;
-                  _showPaymentSheet(amount, _selectedPlan);
-                },
+                onPressed: state.subscriptionLoading ||
+                        _isLoading ||
+                        (_pendingTransactionId != null &&
+                            _paymentStatusMessage !=
+                                'Payment confirmed. Your subscription is active.')
+                    ? null
+                    : _startPayment,
                 style: ElevatedButton.styleFrom(
-                  backgroundColor: Colors.blue,
                   padding: const EdgeInsets.symmetric(vertical: 15),
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
                 ),
-                child: const Text('Proceed to Payment', style: TextStyle(fontSize: 16, color: Colors.white)),
+                child: _isLoading
+                    ? const SizedBox(
+                        height: 20,
+                        width: 20,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : const Text('Proceed to secure payment'),
               ),
             ),
           ],
@@ -233,10 +257,14 @@ class _SubscriptionPageState extends State<SubscriptionPage> {
       child: Container(
         padding: const EdgeInsets.all(20),
         decoration: BoxDecoration(
-          color: isSelected ? Colors.blue.withValues(alpha: 0.1) : Colors.grey[900],
+          color: isSelected
+              ? Theme.of(context).colorScheme.primary.withValues(alpha: 0.1)
+              : Theme.of(context).colorScheme.surface,
           borderRadius: BorderRadius.circular(15),
           border: Border.all(
-            color: isSelected ? Colors.blue : Colors.grey[800]!,
+            color: isSelected
+                ? Theme.of(context).colorScheme.primary
+                : Theme.of(context).dividerColor,
             width: isSelected ? 2 : 1,
           ),
         ),
@@ -246,20 +274,16 @@ class _SubscriptionPageState extends State<SubscriptionPage> {
             Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(title, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.white)),
+                Text(title, style: const TextStyle(fontSize: 18)),
                 if (badge != null) ...[
                   const SizedBox(height: 5),
-                  Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-                    decoration: BoxDecoration(color: Colors.green, borderRadius: BorderRadius.circular(5)),
-                    child: Text(badge, style: const TextStyle(color: Colors.white, fontSize: 12)),
-                  ),
+                  Text(badge, style: const TextStyle(color: Colors.green)),
                 ],
               ],
             ),
             Text(
-              '$price FCFA$duration',
-              style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.green),
+              '\$$price USD$duration',
+              style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
             ),
           ],
         ),

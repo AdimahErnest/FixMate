@@ -5,6 +5,7 @@ import 'package:provider/provider.dart';
 import '../app_state.dart';
 import '../theme.dart';
 import '../widgets/common.dart';
+import '../widgets/business_rating_dialog.dart';
 
 class MyOrdersPage extends StatefulWidget {
   const MyOrdersPage({super.key});
@@ -130,6 +131,31 @@ class _MyOrdersPageState extends State<MyOrdersPage> {
             fontWeight: FontWeight.bold,
           ),
         ),
+        if (item.status == 'delivered' &&
+            item.supplierId != null &&
+            !item.hasReview) ...[
+          const SizedBox(height: 8),
+          OutlinedButton.icon(
+            onPressed: () async {
+              final ok = await showBusinessRatingDialog(
+                context,
+                providerId: item.supplierId!,
+                sourceType: 'order_item',
+                sourceId: item.id,
+                providerName: item.supplierName,
+              );
+              if (ok && mounted) {
+                await context.read<AppState>().loadCustomerOrders();
+              }
+            },
+            icon: const Icon(Icons.star_outline),
+            label: const Text('Rate supplier'),
+          ),
+        ] else if (item.status == 'delivered' && item.hasReview)
+          const Padding(
+            padding: EdgeInsets.only(top: 8),
+            child: Text('Rating submitted'),
+          ),
       ],
     );
   }

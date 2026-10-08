@@ -40,19 +40,28 @@ class _CustomerSignupPageState
    Future<void> register() async {
     final state = context.read<AppState>();
     final t = state.tr;
-    if (password.text != confirmPassword.text) {
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(t('Passwords do not match.'))));
-      return;
-    }
+     final validation = validateSignupFields(
+       name: '${firstName.text.trim()} ${lastName.text.trim()}',
+       email: email.text,
+       phone: phone.text,
+       password: password.text,
+       confirmPassword: confirmPassword.text,
+     );
+     if (validation != null) {
+       ScaffoldMessenger.of(context).showSnackBar(
+         SnackBar(content: Text(t(validation))),
+       );
+       return;
+     }
     
     showDialog(context: context, barrierDismissible: false, builder: (_) => const Center(child: CircularProgressIndicator()));
     
     final success = await state.signUpSupabase(
-      email: email.text.trim(),
+      email: email.text.trim().toLowerCase(),
       password: password.text,
       role: 'Customer',
       fullName: '${firstName.text.trim()} ${lastName.text.trim()}',
-      phone: phone.text.trim(),
+      phone: normalizeSignupPhone(phone.text)!,
     );
     
     if (mounted) Navigator.pop(context); // Close loader
@@ -176,9 +185,16 @@ class _TechnicianSignupPageState extends State<TechnicianSignupPage> {
     final state = context.read<AppState>();
     final t = state.tr;
 
-    if (password.text != confirmPassword.text) {
+    final validation = validateSignupFields(
+      name: '${firstName.text.trim()} ${lastName.text.trim()}',
+      email: email.text,
+      phone: phone.text,
+      password: password.text,
+      confirmPassword: confirmPassword.text,
+    );
+    if (validation != null) {
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(t('Passwords do not match.'))),
+        SnackBar(content: Text(t(validation))),
       );
       return;
     }
@@ -196,11 +212,11 @@ class _TechnicianSignupPageState extends State<TechnicianSignupPage> {
     );
 
     final success = await state.signUpSupabase(
-      email: email.text.trim(),
+      email: email.text.trim().toLowerCase(),
       password: password.text,
       role: 'Technician',
       fullName: '${firstName.text.trim()} ${lastName.text.trim()}',
-      phone: phone.text.trim(),
+      phone: normalizeSignupPhone(phone.text)!,
       services: selectedServices.toList(),
     );
 
@@ -346,20 +362,38 @@ class _SupplierSignupPageState
     Future<void> register() async {
     final state = context.read<AppState>();
     final t = state.tr;
-    if (password.text != confirmPassword.text) {
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(t('Passwords do not match.'))));
+    final validation = validateSignupFields(
+      name: company.text,
+      email: email.text,
+      phone: phone.text,
+      password: password.text,
+      confirmPassword: confirmPassword.text,
+      additionalPhone: additionalPhone.text,
+    );
+    if (validation != null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(t(validation))),
+      );
+      return;
+    }
+    if (selectedItems.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(t('Please select at least one supply category.'))),
+      );
       return;
     }
     showDialog(context: context, barrierDismissible: false, builder: (_) => const Center(child: CircularProgressIndicator()));
     
     final success = await state.signUpSupabase(
-      email: email.text.trim(),
+      email: email.text.trim().toLowerCase(),
       password: password.text,
       role: 'Supplier',
       fullName: company.text.trim().isEmpty ? 'FixMate Supplier' : company.text.trim(),
-      phone: phone.text.trim(),
+      phone: normalizeSignupPhone(phone.text)!,
       categories: selectedItems.toList(),
-      additionalPhone: additionalPhone.text.trim(),
+      additionalPhone: additionalPhone.text.trim().isEmpty
+          ? null
+          : normalizeSignupPhone(additionalPhone.text),
     );
     
     if (mounted) Navigator.pop(context);

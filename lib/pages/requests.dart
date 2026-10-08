@@ -5,6 +5,8 @@ import 'package:provider/provider.dart';
 import '../app_state.dart';
 import '../theme.dart';
 import '../widgets/common.dart';
+import '../widgets/business_rating_dialog.dart';
+import 'subscription.dart';
 
 class RequestsPage extends StatefulWidget {
   const RequestsPage({super.key});
@@ -149,7 +151,9 @@ class _RequestsPageState extends State<RequestsPage> {
       actions = SizedBox(
         width: double.infinity,
         child: FilledButton(
-          onPressed: busy ? null : () => changeStatus(request, 'completed'),
+          onPressed: busy || !context.read<AppState>().hasActiveBusinessSubscription
+              ? null
+              : () => changeStatus(request, 'completed'),
           child: Text(t('Mark as completed')),
         ),
       );
@@ -171,6 +175,47 @@ class _RequestsPageState extends State<RequestsPage> {
           child: Text(t('Cancel request')),
         ),
       );
+    }
+    if (received &&
+        (request.status == 'pending' || request.status == 'accepted') &&
+        !context.read<AppState>().hasActiveBusinessSubscription) {
+      actions = Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          const Text('An active subscription is required to manage service requests.'),
+          TextButton(
+            onPressed: () => Navigator.push(
+              context,
+              MaterialPageRoute(builder: (_) => const SubscriptionPage()),
+            ),
+            child: const Text('View subscription plans'),
+          ),
+        ],
+      );
+    }
+    if (!received &&
+        request.status == 'completed' &&
+        !request.hasReview) {
+      actions = FilledButton.tonalIcon(
+        onPressed: () async {
+          final ok = await showBusinessRatingDialog(
+            context,
+            providerId: request.technicianId,
+            sourceType: 'service_request',
+            sourceId: request.id,
+            providerName: request.technicianName,
+          );
+          if (ok && mounted) {
+            await context.read<AppState>().loadServiceRequests();
+          }
+        },
+        icon: const Icon(Icons.star_outline),
+        label: const Text('Rate technician'),
+      );
+    } else if (!received &&
+        request.status == 'completed' &&
+        request.hasReview) {
+      actions = const Text('Rating submitted');
     }
 
     return Card(

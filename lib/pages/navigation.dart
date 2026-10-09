@@ -3,6 +3,8 @@ import 'subscription.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../app_state.dart';
+import '../theme.dart';
+import '../widgets/common.dart';
 import 'admin_dashboard.dart';
 import 'home.dart';
 import 'technicians.dart';
@@ -108,16 +110,25 @@ class FixMateBottomNavigation extends StatelessWidget {
         ? [Icons.home, Icons.shopping_bag, Icons.card_membership, Icons.person]
         : [Icons.home, Icons.handyman, Icons.shopping_bag, Icons.person];
 
-    return NavigationBar(
-      selectedIndex: currentIndex,
-      onDestinationSelected: onChanged,
-      destinations: List.generate(labels.length, (index) {
-        return NavigationDestination(
-          icon: Icon(icons[index]),
-          selectedIcon: Icon(selectedIcons[index]),
-          label: labels[index],
-        );
-      }),
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(12, 4, 12, 8),
+      child: GlassPanel(
+        borderRadius: BorderRadius.circular(24),
+        child: NavigationBar(
+          backgroundColor: Colors.transparent,
+          elevation: 0,
+          indicatorColor: FixMateTheme.gold.withValues(alpha: .22),
+          selectedIndex: currentIndex,
+          onDestinationSelected: onChanged,
+          destinations: List.generate(labels.length, (index) {
+            return NavigationDestination(
+              icon: Icon(icons[index]),
+              selectedIcon: Icon(selectedIcons[index]),
+              label: labels[index],
+            );
+          }),
+        ),
+      ),
     );
   }
 }

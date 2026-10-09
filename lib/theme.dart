@@ -2,15 +2,30 @@
 import 'package:flutter/material.dart';
 
 class FixMateTheme {
-  static const Color gold = Color(0xFFB58A3A);
-  static const Color darkGold = Color(0xFF8D6828);
-  static const Color lightBackground = Color(0xFFF1F0E9);
+  static const Color gold = Color(0xFFB18B42);
+  static const Color buttonGold = Color(0xFF8F6E32);
+  static const Color darkGold = Color(0xFF805B18);
+  static const Color lightBackground = Color(0xFFF6F0EE);
+  static const Color lightBackgroundEnd = Color(0xFFECE5E2);
+  static const Color lightSurface = Color(0xFFFFFBF8);
+  static const Color lightBorder = Color(0xFFE4D6D2);
   static const Color darkBackground = Color(0xFF101010);
+  static const Color darkBackgroundEnd = Color(0xFF101010);
   static const Color darkCard = Color(0xFF1B1B1B);
+  static const Color darkBorder = Color(0xFF30302D);
+
+  static LinearGradient backgroundGradient(Brightness brightness) =>
+      LinearGradient(
+        begin: Alignment.topLeft,
+        end: Alignment.bottomRight,
+        colors: brightness == Brightness.dark
+            ? const [darkBackground, darkBackgroundEnd]
+            : const [lightBackground, lightBackgroundEnd],
+      );
 
   static ThemeData lightTheme = ThemeData(
     useMaterial3: true,
-    scaffoldBackgroundColor: lightBackground,
+    scaffoldBackgroundColor: Colors.transparent,
     colorScheme: ColorScheme.fromSeed(
       seedColor: gold,
       brightness: Brightness.light,
@@ -19,7 +34,7 @@ class FixMateTheme {
       onPrimary: Colors.white,
       primaryContainer: const Color(0xFFF2E7D1),
       onPrimaryContainer: const Color(0xFF39270C),
-      surface: lightBackground,
+      surface: lightSurface,
     ),
     textTheme: Typography.material2021().black.apply(
           bodyColor: const Color(0xFF292820),
@@ -32,25 +47,25 @@ class FixMateTheme {
       centerTitle: false,
     ),
     cardTheme: CardThemeData(
-      color: Colors.white,
+      color: lightSurface,
       elevation: 0,
       surfaceTintColor: Colors.transparent,
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(18),
-        side: const BorderSide(color: Color(0xFFECE8DE)),
+        side: const BorderSide(color: lightBorder),
       ),
       margin: EdgeInsets.zero,
     ),
     inputDecorationTheme: InputDecorationTheme(
       filled: true,
-      fillColor: Colors.white,
+      fillColor: lightSurface,
       border: OutlineInputBorder(
         borderRadius: BorderRadius.circular(16),
         borderSide: BorderSide.none,
       ),
       enabledBorder: OutlineInputBorder(
         borderRadius: BorderRadius.circular(16),
-        borderSide: const BorderSide(color: Color(0xFFECE8DE)),
+        borderSide: const BorderSide(color: lightBorder),
       ),
       focusedBorder: OutlineInputBorder(
         borderRadius: BorderRadius.circular(16),
@@ -63,6 +78,8 @@ class FixMateTheme {
     ),
     elevatedButtonTheme: ElevatedButtonThemeData(
       style: ElevatedButton.styleFrom(
+        backgroundColor: buttonGold,
+        foregroundColor: Colors.white,
         minimumSize: const Size(48, 52),
         padding: const EdgeInsets.symmetric(horizontal: 22, vertical: 14),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)),
@@ -97,7 +114,7 @@ class FixMateTheme {
       surfaceTintColor: Colors.transparent,
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(18),
-        side: const BorderSide(color: Color(0xFF30302D)),
+        side: const BorderSide(color: darkBorder),
       ),
       margin: EdgeInsets.zero,
     ),
@@ -110,7 +127,7 @@ class FixMateTheme {
       ),
       enabledBorder: OutlineInputBorder(
         borderRadius: BorderRadius.circular(16),
-        borderSide: const BorderSide(color: Color(0xFF30302D)),
+        borderSide: const BorderSide(color: darkBorder),
       ),
       focusedBorder: OutlineInputBorder(
         borderRadius: BorderRadius.circular(16),
@@ -123,6 +140,8 @@ class FixMateTheme {
     ),
     elevatedButtonTheme: ElevatedButtonThemeData(
       style: ElevatedButton.styleFrom(
+        backgroundColor: buttonGold,
+        foregroundColor: Colors.white,
         minimumSize: const Size(48, 52),
         padding: const EdgeInsets.symmetric(horizontal: 22, vertical: 14),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)),

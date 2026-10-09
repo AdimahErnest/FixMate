@@ -1,6 +1,7 @@
 // FixMate — Forgot-password email-code flow
 import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import '../app_state.dart';
 import '../theme.dart';
@@ -23,6 +24,10 @@ class _ForgotPasswordPageState extends State<ForgotPasswordPage> {
   final confirmController = TextEditingController();
   bool codeSent = false;
   bool busy = false;
+  bool showPassword = false;
+  bool showConfirmation = false;
+  int resendSeconds = 0;
+  Timer? resendTimer;
 
   @override
   void initState() {
@@ -36,11 +41,40 @@ class _ForgotPasswordPageState extends State<ForgotPasswordPage> {
     codeController.dispose();
     passwordController.dispose();
     confirmController.dispose();
+    resendTimer?.cancel();
     super.dispose();
   }
 
   void showMessage(String text) {
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(text)));
+  }
+
+  void startResendCooldown() {
+    resendTimer?.cancel();
+    setState(() => resendSeconds = 60);
+    resendTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
+      if (!mounted) {
+        timer.cancel();
+        return;
+      }
+      if (resendSeconds <= 1) {
+        timer.cancel();
+        setState(() => resendSeconds = 0);
+      } else {
+        setState(() => resendSeconds--);
+      }
+    });
+  }
+
+  void changeEmail() {
+    resendTimer?.cancel();
+    setState(() {
+      codeSent = false;
+      resendSeconds = 0;
+      codeController.clear();
+      passwordController.clear();
+      confirmController.clear();
+    });
   }
 
   Future<void> sendCode() async {
@@ -58,8 +92,12 @@ class _ForgotPasswordPageState extends State<ForgotPasswordPage> {
     if (!mounted) return;
     setState(() {
       busy = false;
-      if (ok) codeSent = true;
+      if (ok) {
+        codeSent = true;
+        codeController.clear();
+      }
     });
+    if (ok) startResendCooldown();
     showMessage(
       ok
           ? t('If an account exists for this email, a code has been sent.')
@@ -73,7 +111,7 @@ class _ForgotPasswordPageState extends State<ForgotPasswordPage> {
     final code = codeController.text.trim();
     final newPassword = passwordController.text;
 
-    if (code.isEmpty) {
+    if (!isValidRecoveryCode(code)) {
       showMessage(t('Please enter the code from your email.'));
       return;
     }
@@ -125,11 +163,19 @@ class _ForgotPasswordPageState extends State<ForgotPasswordPage> {
               t('Enter your email and we will send you a code.'),
               textAlign: TextAlign.center,
             ),
+            const SizedBox(height: 8),
+            Text(
+              t('Use the newest code sent to your inbox. Check spam if it is missing.'),
+              textAlign: TextAlign.center,
+              style: Theme.of(context).textTheme.bodySmall,
+            ),
             const SizedBox(height: 20),
             TextField(
               controller: emailController,
               readOnly: codeSent,
               keyboardType: TextInputType.emailAddress,
+              autofillHints: const [AutofillHints.email],
+              textInputAction: TextInputAction.done,
               decoration: InputDecoration(
                 labelText: t('Email'),
                 prefixIcon: const Icon(Icons.email_outlined),
@@ -140,7 +186,7 @@ class _ForgotPasswordPageState extends State<ForgotPasswordPage> {
               ElevatedButton(
                 onPressed: busy ? null : sendCode,
                 style: ElevatedButton.styleFrom(
-                  backgroundColor: FixMateTheme.gold,
+                  backgroundColor: FixMateTheme.buttonGold,
                   foregroundColor: Colors.white,
                   padding: const EdgeInsets.symmetric(vertical: 16),
                 ),
@@ -156,34 +202,67 @@ class _ForgotPasswordPageState extends State<ForgotPasswordPage> {
               TextField(
                 controller: codeController,
                 keyboardType: TextInputType.number,
+                autofillHints: const [AutofillHints.oneTimeCode],
+                inputFormatters: [
+                  FilteringTextInputFormatter.digitsOnly,
+                  LengthLimitingTextInputFormatter(8),
+                ],
+                textInputAction: TextInputAction.next,
                 decoration: InputDecoration(
                   labelText: t('Code from your email'),
                   prefixIcon: const Icon(Icons.pin_outlined),
+                  helperText: t('Enter the 6 to 8 digit code from the latest email.'),
                 ),
               ),
               const SizedBox(height: 14),
               TextField(
                 controller: passwordController,
-                obscureText: true,
+                obscureText: !showPassword,
+                autofillHints: const [AutofillHints.newPassword],
+                textInputAction: TextInputAction.next,
                 decoration: InputDecoration(
                   labelText: t('New password'),
                   prefixIcon: const Icon(Icons.lock_outline),
+                  helperText: t('Use at least 8 characters with uppercase, lowercase, and a number.'),
+                  suffixIcon: IconButton(
+                    tooltip: t(showPassword ? 'Hide password' : 'Show password'),
+                    onPressed: () =>
+                        setState(() => showPassword = !showPassword),
+                    icon: Icon(
+                      showPassword ? Icons.visibility_off : Icons.visibility,
+                    ),
+                  ),
                 ),
               ),
               const SizedBox(height: 14),
               TextField(
                 controller: confirmController,
-                obscureText: true,
+                obscureText: !showConfirmation,
+                autofillHints: const [AutofillHints.newPassword],
+                textInputAction: TextInputAction.done,
                 decoration: InputDecoration(
                   labelText: t('Confirm password'),
                   prefixIcon: const Icon(Icons.lock_outline),
+                  suffixIcon: IconButton(
+                    tooltip: t(
+                      showConfirmation ? 'Hide password' : 'Show password',
+                    ),
+                    onPressed: () => setState(
+                      () => showConfirmation = !showConfirmation,
+                    ),
+                    icon: Icon(
+                      showConfirmation
+                          ? Icons.visibility_off
+                          : Icons.visibility,
+                    ),
+                  ),
                 ),
               ),
               const SizedBox(height: 16),
               ElevatedButton(
                 onPressed: busy ? null : resetPassword,
                 style: ElevatedButton.styleFrom(
-                  backgroundColor: FixMateTheme.gold,
+                  backgroundColor: FixMateTheme.buttonGold,
                   foregroundColor: Colors.white,
                   padding: const EdgeInsets.symmetric(vertical: 16),
                 ),
@@ -196,8 +275,16 @@ class _ForgotPasswordPageState extends State<ForgotPasswordPage> {
                     : Text(t('RESET PASSWORD')),
               ),
               TextButton(
-                onPressed: busy ? null : sendCode,
-                child: Text(t('Resend code')),
+                onPressed: busy || resendSeconds > 0 ? null : sendCode,
+                child: Text(
+                  resendSeconds > 0
+                      ? '${t('Resend code')} (${resendSeconds}s)'
+                      : t('Resend code'),
+                ),
+              ),
+              TextButton(
+                onPressed: busy ? null : changeEmail,
+                child: Text(t('Use a different email')),
               ),
             ],
           ],

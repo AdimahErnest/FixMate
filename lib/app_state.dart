@@ -51,6 +51,7 @@ class AppState extends ChangeNotifier {
   DateTime? subscriptionExpiresAt;
   bool subscriptionLoading = false;
   bool subscriptionLoadFailed = false;
+  Map<String, dynamic>? _pendingSignup;
 
   bool get hasActiveBusinessSubscription =>
       (userRole == 'Technician' || userRole == 'Supplier') &&
@@ -1147,64 +1148,178 @@ class AppState extends ChangeNotifier {
     return loggedIn;
   }
 
-  Future<bool> signUpSupabase({
+  Future<bool> beginSignupVerification({
     required String email,
     required String password,
     required String role,
     required String fullName,
+    required String verificationMethod,
     String? phone,
+    String? region,
+    String? town,
     List<String>? services,
     List<String>? categories,
     String? additionalPhone,
   }) async {
     authError = '';
+    final normalizedEmail = email.trim().toLowerCase();
+    final normalizedPhone = phone?.trim() ?? '';
+    final normalizedRegion = region?.trim() ?? '';
+    final normalizedTown = town?.trim() ?? '';
+    final normalizedAdditionalPhone = additionalPhone?.trim() ?? '';
+    final details = <String, dynamic>{
+      'email': normalizedEmail,
+      'password': password,
+      'role': role,
+      'full_name': fullName,
+      if (normalizedPhone.isNotEmpty) 'phone': normalizedPhone,
+      if (normalizedRegion.isNotEmpty) 'region': normalizedRegion,
+      if (normalizedTown.isNotEmpty) 'town': normalizedTown,
+      if (normalizedRegion.isNotEmpty && normalizedTown.isNotEmpty)
+        'location': '$normalizedTown, $normalizedRegion',
+      if (services != null) 'services': services,
+      if (categories != null) 'categories': categories,
+      if (normalizedAdditionalPhone.isNotEmpty)
+        'additional_phone': normalizedAdditionalPhone,
+    };
+    _pendingSignup = {
+      ...details,
+      'verification_method': verificationMethod,
+    };
+
     try {
-      final response = await supabase.auth.signUp(
-        email: email,
-        password: password,
-        data: {
-          'role': role,
-          'full_name': fullName,
-          if (phone != null && phone.isNotEmpty) 'phone': phone,
-          'services': ?services,
-          'categories': ?categories,
-          if (additionalPhone != null && additionalPhone.isNotEmpty)
-            'additional_phone': additionalPhone,
-        },
-      );
-      final user = response.user;
+      if (verificationMethod == 'email') {
+        final response = await supabase.auth.signUp(
+          email: normalizedEmail,
+          password: password,
+          data: {
+            'role': role,
+            'full_name': fullName,
+            if (normalizedPhone.isNotEmpty) 'phone': normalizedPhone,
+            if (normalizedRegion.isNotEmpty) 'region': normalizedRegion,
+            if (normalizedTown.isNotEmpty) 'town': normalizedTown,
+            if (normalizedRegion.isNotEmpty && normalizedTown.isNotEmpty)
+              'location': '$normalizedTown, $normalizedRegion',
+            if (services != null) 'services': services,
+            if (categories != null) 'categories': categories,
+            if (normalizedAdditionalPhone.isNotEmpty)
+              'additional_phone': normalizedAdditionalPhone,
+          },
+        );
+        if (response.user == null ||
+            (response.user!.identities?.isEmpty ?? false)) {
+          _pendingSignup = null;
+          authError =
+              'Could not send a code. Check the email address or sign in if you already have an account.';
+          return false;
+        }
+        if (response.session != null) {
+          await supabase.auth.signOut();
+          _pendingSignup = null;
+          authError =
+              'Email verification is not enabled. Please contact support.';
+          return false;
+        }
+        return true;
+      }
+      if (verificationMethod == 'whatsapp' && phone != null) {
+        await const PhoneAuthService().sendWhatsappSignupCode(phone: phone);
+        return true;
+      }
+      _pendingSignup = null;
+      authError = 'Please choose a valid verification method.';
+      return false;
+    } catch (e) {
+      _pendingSignup = null;
+      debugPrint('Signup verification request failed: $e');
+      authError = e is PhoneAuthException
+          ? e.message
+          : _friendlyAuthError(e);
+      return false;
+    }
+  }
+
+  Future<bool> verifySignupCode(String code) async {
+    authError = '';
+    final details = _pendingSignup;
+    if (details == null) {
+      authError = 'Signup has expired. Please start again.';
+      return false;
+    }
+
+    try {
+      User? user;
+      if (details['verification_method'] == 'email') {
+        final response = await supabase.auth.verifyOTP(
+          email: details['email'] as String,
+          token: code,
+          type: OtpType.signup,
+        );
+        user = response.user;
+      } else if (details['verification_method'] == 'whatsapp') {
+        final session = await const PhoneAuthService()
+            .verifyWhatsappSignupCode(
+              phone: details['phone'] as String,
+              email: details['email'] as String,
+              password: details['password'] as String,
+              code: code,
+              role: details['role'] as String,
+              fullName: details['full_name'] as String,
+              region: (details['region'] as String?) ?? '',
+              town: (details['town'] as String?) ?? '',
+              services: details['services'] as List<String>?,
+              categories: details['categories'] as List<String>?,
+              additionalPhone: details['additional_phone'] as String?,
+            );
+        final response = await supabase.auth.setSession(session.refreshToken);
+        user = response.user;
+      }
       if (user == null) {
-        authError = 'Signup failed. Please try again.';
+        authError = 'Could not verify the code. Please try again.';
         return false;
       }
-
-      // The database trigger has already saved the profile - and, for a
-      // Technician or Supplier, the services/categories row too - from the
-      // metadata above. This happens immediately, whether or not email
-      // confirmation is required, so there's nothing left to save here.
-      if (response.session == null) {
-        authError = 'Account created! Please confirm your email, then log in.';
-        return false;
-      }
-
-      userRole = role;
-      profileName = fullName;
-      profileEmail = email;
-      profilePhone = phone ?? '';
-      profileLocation = 'Douala';
-      loginIdentifier = email;
-      loggedIn = true;
-
-      final prefs = await SharedPreferences.getInstance();
-      await prefs.setString('userRole', userRole);
-      await prefs.setString('loginIdentifier', loginIdentifier);
-
+      await _applyProfile(user.id, details['email'] as String);
+      _pendingSignup = null;
       notifyListeners();
-      startNotificationStream();
       return true;
     } catch (e) {
-      debugPrint('Sign up error: $e');
-      authError = _friendlyAuthError(e);
+      debugPrint('Signup verification failed: $e');
+      authError = e is PhoneAuthException
+          ? e.message
+          : e is AuthException
+          ? e.message
+          : _friendlyAuthError(e);
+      return false;
+    }
+  }
+
+  Future<bool> resendSignupCode() async {
+    authError = '';
+    final details = _pendingSignup;
+    if (details == null) {
+      authError = 'Signup has expired. Please start again.';
+      return false;
+    }
+    try {
+      if (details['verification_method'] == 'email') {
+        await supabase.auth.resend(
+          type: OtpType.signup,
+          email: details['email'] as String,
+        );
+      } else if (details['verification_method'] == 'whatsapp') {
+        await const PhoneAuthService().sendWhatsappSignupCode(
+          phone: details['phone'] as String,
+        );
+      } else {
+        authError = 'Please restart signup and choose a verification method.';
+        return false;
+      }
+      return true;
+    } catch (e) {
+      debugPrint('Resend signup verification failed: $e');
+      authError = e is PhoneAuthException
+          ? e.message
+          : _friendlyAuthError(e);
       return false;
     }
   }
@@ -1227,12 +1342,14 @@ class AppState extends ChangeNotifier {
     required String newPassword,
   }) async {
     authError = '';
+    var recoveryVerified = false;
     try {
       await supabase.auth.verifyOTP(
         email: email,
         token: code,
         type: OtpType.recovery,
       );
+      recoveryVerified = true;
       await supabase.auth.updateUser(UserAttributes(password: newPassword));
       return true;
     } catch (e) {
@@ -1248,10 +1365,13 @@ class AppState extends ChangeNotifier {
       }
       return false;
     } finally {
-      // verifyOTP signs the user in, so sign out and make them log in normally
-      try {
-        await supabase.auth.signOut();
-      } catch (_) {}
+      if (recoveryVerified) {
+        try {
+          await supabase.auth.signOut();
+        } catch (e) {
+          debugPrint('Sign out after password recovery failed: $e');
+        }
+      }
     }
   }
 
@@ -1439,6 +1559,24 @@ class AppState extends ChangeNotifier {
       'First name': 'Prénom',
       'Last name': 'Nom',
       'Confirm password': 'Confirmer le mot de passe',
+      'At least 8 characters, with uppercase, lowercase, and a number.':
+          'Au moins 8 caractères, avec une majuscule, une minuscule et un chiffre.',
+      'Verify account with': 'Vérifier le compte avec',
+      'Email code': 'Code par e-mail',
+      'WhatsApp code': 'Code WhatsApp',
+      'Verify your account': 'Vérifiez votre compte',
+      'Enter your verification code': 'Entrez votre code de vérification',
+      'We sent a six-digit code to': 'Nous avons envoyé un code à six chiffres à',
+      'If you do not receive it, check the address or number and try again.':
+          'Si vous ne le recevez pas, vérifiez l’adresse ou le numéro et réessayez.',
+      '6-digit verification code': 'Code de vérification à 6 chiffres',
+      'Enter the 6-digit verification code.':
+          'Entrez le code de vérification à 6 chiffres.',
+      'VERIFY AND CREATE ACCOUNT': 'VÉRIFIER ET CRÉER LE COMPTE',
+      'A new verification code has been sent.':
+          'Un nouveau code de vérification a été envoyé.',
+      'Please enter a valid email address.':
+          'Veuillez entrer une adresse e-mail valide.',
       'CREATE CUSTOMER ACCOUNT': 'CRÉER LE COMPTE CLIENT',
       'Technician Registration': 'Inscription technicien',
       'Create technician account': 'Créer un compte technicien',
@@ -1458,6 +1596,20 @@ class AppState extends ChangeNotifier {
       'Location': 'Localisation',
       'Region': 'Région',
       'Town': 'Ville',
+      'Your location': 'Votre emplacement',
+      'Select a region first, then choose your town.':
+          'Sélectionnez d’abord une région, puis choisissez votre ville.',
+      'Please select your region.': 'Veuillez sélectionner votre région.',
+      'Please select a town in your region.':
+          'Veuillez sélectionner une ville de votre région.',
+      'Adamawa': 'Adamaoua',
+      'West': 'Ouest',
+      'Southwest': 'Sud-Ouest',
+      'Northwest': 'Nord-Ouest',
+      'South': 'Sud',
+      'East': 'Est',
+      'North': 'Nord',
+      'Far North': 'Extrême-Nord',
       'Business verification documents can be submitted after registration.':
           "Les documents de vérification de l'entreprise peuvent être soumis après l'inscription.",
       'CREATE SUPPLIER ACCOUNT': 'CRÉER LE COMPTE FOURNISSEUR',
@@ -1764,9 +1916,16 @@ class AppState extends ChangeNotifier {
       'Reset password': 'Réinitialiser le mot de passe',
       'Enter your email and we will send you a code.':
           'Entrez votre e-mail et nous vous enverrons un code.',
+      'Use the newest code sent to your inbox. Check spam if it is missing.':
+          'Utilisez le code le plus récent reçu par e-mail. Vérifiez les courriers indésirables si nécessaire.',
       'SEND CODE': 'ENVOYER LE CODE',
       'Resend code': 'Renvoyer le code',
+      'Use a different email': 'Utiliser une autre adresse e-mail',
       'Code from your email': 'Code reçu par e-mail',
+      'Enter the 6 to 8 digit code from the latest email.':
+          'Entrez le code de 6 à 8 chiffres du dernier e-mail reçu.',
+      'Show password': 'Afficher le mot de passe',
+      'Hide password': 'Masquer le mot de passe',
       'New password': 'Nouveau mot de passe',
       'RESET PASSWORD': 'RÉINITIALISER',
       'Please enter the code from your email.':
@@ -1794,12 +1953,26 @@ class AppState extends ChangeNotifier {
           'Veuillez d’abord confirmer votre e-mail. Vérifiez votre boîte de réception.',
       'An account with this email already exists.':
           'Un compte avec cet e-mail existe déjà.',
+      'An account with this email or phone number already exists.':
+          'Un compte avec cet e-mail ou ce numéro existe déjà.',
+      'The WhatsApp code is invalid or has expired.':
+          'Le code WhatsApp est invalide ou a expiré.',
+      'Could not send a WhatsApp code. Check the number and try again.':
+          'Impossible d’envoyer un code WhatsApp. Vérifiez le numéro et réessayez.',
+      'Wait a minute before requesting another code.':
+          'Attendez une minute avant de demander un autre code.',
+      'Could not complete signup. Please try again.':
+          'Impossible de terminer l’inscription. Veuillez réessayer.',
+      'Signup has expired. Please start again.':
+          'L’inscription a expiré. Veuillez recommencer.',
+      'Email verification is not enabled. Please contact support.':
+          'La vérification par e-mail n’est pas activée. Contactez le support.',
+      'Password is too weak. Use at least 8 characters with uppercase, lowercase, and a number.':
+          'Mot de passe trop faible. Utilisez au moins 8 caractères avec majuscule, minuscule et chiffre.',
       'Password is too weak. Use at least 6 characters.':
           'Mot de passe trop faible. Utilisez au moins 6 caractères.',
       'Too many attempts. Please wait a moment and try again.':
           'Trop de tentatives. Veuillez patienter un instant et réessayer.',
-      'Please enter a valid email address.':
-          'Veuillez entrer une adresse e-mail valide.',
       'No internet connection. Please check your network.':
           'Pas de connexion internet. Vérifiez votre réseau.',
       'Something went wrong. Please try again.':

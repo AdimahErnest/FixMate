@@ -185,7 +185,10 @@ class HomePage extends StatelessWidget {
                           gradient: const LinearGradient(
                             begin: Alignment.topLeft,
                             end: Alignment.bottomRight,
-                            colors: [FixMateTheme.gold, FixMateTheme.darkGold],
+                            colors: [
+                              FixMateTheme.buttonGold,
+                              FixMateTheme.darkGold,
+                            ],
                           ),
                           borderRadius: BorderRadius.circular(26),
                           boxShadow: [

@@ -27,6 +27,38 @@ void main() {
         ),
         isNull,
       );
+      expect(isValidSignupEmail(' person@example.com '), isTrue);
+      expect(isValidSignupEmail('missing-domain'), isFalse);
+      expect(isValidSignupCode('123456'), isTrue);
+      expect(isValidSignupCode('12345'), isFalse);
+    });
+
+    group('signup location validation', () {
+      test('accepts a town in its selected region', () {
+        expect(
+          validateSignupLocation(region: 'Littoral', town: 'Douala'),
+          isNull,
+        );
+        expect(
+          validateSignupLocation(region: 'Far North', town: 'Maroua'),
+          isNull,
+        );
+      });
+
+      test('requires a known region and a town belonging to it', () {
+        expect(
+          validateSignupLocation(region: null, town: null),
+          'Please select your region.',
+        );
+        expect(
+          validateSignupLocation(region: 'Littoral', town: 'Yaoundé'),
+          'Please select a town in your region.',
+        );
+        expect(
+          validateSignupLocation(region: 'Unknown', town: 'Douala'),
+          'Please select your region.',
+        );
+      });
     });
 
     test('rejects weak or mismatched passwords and invalid emails', () {
@@ -42,6 +74,21 @@ void main() {
       );
       expect(isStrongSignupPassword('lowercase1'), isFalse);
       expect(isStrongSignupPassword('Uppercase1'), isTrue);
+      expect(isStrongSignupPassword('Abc1234'), isFalse);
+      expect(isStrongSignupPassword('Abcdefgh'), isFalse);
+    });
+  });
+
+  group('password recovery code validation', () {
+    test('accepts numeric six-to-eight digit email codes', () {
+      expect(isValidRecoveryCode('123456'), isTrue);
+      expect(isValidRecoveryCode('12345678'), isTrue);
+    });
+
+    test('rejects short, long, or non-numeric codes', () {
+      expect(isValidRecoveryCode('12345'), isFalse);
+      expect(isValidRecoveryCode('123456789'), isFalse);
+      expect(isValidRecoveryCode('12ab56'), isFalse);
     });
   });
 }

@@ -58,8 +58,15 @@ class _FixMateAppState extends State<FixMateApp> {
           theme: FixMateTheme.lightTheme,
           darkTheme: FixMateTheme.darkTheme,
           home: const SplashScreen(),
-          builder: (context, child) => ConnectivityWrapper(
-            child: child ?? const SizedBox.shrink(),
+          builder: (context, child) => DecoratedBox(
+            decoration: BoxDecoration(
+              gradient: FixMateTheme.backgroundGradient(
+                Theme.of(context).brightness,
+              ),
+            ),
+            child: ConnectivityWrapper(
+              child: child ?? const SizedBox.shrink(),
+            ),
           ),
         );
       },

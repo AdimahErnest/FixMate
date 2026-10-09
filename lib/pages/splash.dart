@@ -1,5 +1,6 @@
 // FixMate — splash screen, restores the Supabase session
 import 'dart:async';
+import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../app_state.dart';
@@ -40,7 +41,8 @@ class _SplashScreenState extends State<SplashScreen>
     Navigator.pushReplacement(
       context,
       MaterialPageRoute(
-        builder: (_) => state.loggedIn ? const MainNavigation() : const LoginPage(),
+        builder: (_) =>
+            state.loggedIn ? const MainNavigation() : const LoginPage(),
       ),
     );
   }
@@ -54,14 +56,22 @@ class _SplashScreenState extends State<SplashScreen>
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      body: Center(
-        child: FadeTransition(
-          opacity: animation,
-          child: ScaleTransition(
-            scale: animation,
-            child: const FixMateLogo(size: 150),
-          ),
-        ),
+      body: LayoutBuilder(
+        builder: (context, constraints) {
+          final logoSize = math.min(
+            math.min(constraints.maxWidth * .78, constraints.maxHeight * .52),
+            360.0,
+          );
+          return Center(
+            child: FadeTransition(
+              opacity: animation,
+              child: ScaleTransition(
+                scale: animation,
+                child: FixMateLogo(size: logoSize),
+              ),
+            ),
+          );
+        },
       ),
     );
   }

@@ -18,6 +18,9 @@ const envNames = [
   'FAPSHI_API_KEY',
   'FAPSHI_BASE_URL',
   'FAPSHI_WEBHOOK_SECRET',
+  'TWILIO_ACCOUNT_SID',
+  'TWILIO_AUTH_TOKEN',
+  'TWILIO_VERIFY_SERVICE_SID',
 ];
 
 function saveEnvironment() {
@@ -38,6 +41,9 @@ function configureTestEnvironment() {
   process.env.FAPSHI_API_USER = 'test-fapshi-user';
   process.env.FAPSHI_API_KEY = 'test-fapshi-key';
   process.env.FAPSHI_BASE_URL = 'https://sandbox.fapshi.com';
+  process.env.TWILIO_ACCOUNT_SID = 'test-twilio-account';
+  process.env.TWILIO_AUTH_TOKEN = 'test-twilio-token';
+  process.env.TWILIO_VERIFY_SERVICE_SID = 'test-verify-service';
 }
 
 async function startServer(t) {
@@ -357,6 +363,166 @@ test('normalizes supported Cameroon mobile number formats and rejects invalid on
   assert.equal(normalizeCameroonPhone('0677123456'), '677123456');
   assert.equal(normalizeCameroonPhone('123456789'), null);
   assert.equal(normalizeCameroonPhone('67712345'), null);
+});
+
+test('WhatsApp signup verifies the phone before creating a Supabase account', async (t) => {
+  const originalEnv = saveEnvironment();
+  const originalFetch = global.fetch;
+  let createdAccount;
+  let sentVerification;
+  t.after(() => {
+    global.fetch = originalFetch;
+    restoreEnvironment(originalEnv);
+  });
+  configureTestEnvironment();
+
+  global.fetch = async (input, options = {}) => {
+    const url = new URL(input);
+    if (url.hostname === 'verify.twilio.com') {
+      const form = new URLSearchParams(options.body);
+      if (url.pathname.endsWith('/Verifications')) {
+        sentVerification = Object.fromEntries(form);
+        return Response.json({ status: 'pending' });
+      }
+      assert.equal(url.pathname.endsWith('/VerificationCheck'), true);
+      assert.equal(form.get('Code'), '123456');
+      return Response.json({ status: 'approved' });
+    }
+    if (
+      url.pathname === '/auth/v1/admin/users' &&
+      options.method === 'POST'
+    ) {
+      createdAccount = JSON.parse(options.body);
+      return Response.json(
+        { id: 'verified-user-1', email: createdAccount.email },
+        { status: 200 },
+      );
+    }
+    if (
+      url.pathname === '/auth/v1/token' &&
+      url.searchParams.get('grant_type') === 'password'
+    ) {
+      assert.deepEqual(JSON.parse(options.body), {
+        phone: '+237677123456',
+        password: 'FixMate2026',
+      });
+      return Response.json({
+        access_token: 'access-token',
+        refresh_token: 'refresh-token',
+      });
+    }
+    throw new Error(`Unexpected mocked upstream request: ${url}`);
+  };
+
+  const baseUrl = await startServer(t);
+  const send = await originalFetch(
+    `${baseUrl}/api/auth/signup/whatsapp/send`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ phone: '677123456' }),
+    },
+  );
+  assert.equal(send.status, 202);
+  assert.deepEqual(sentVerification, {
+    To: '+237677123456',
+    Channel: 'whatsapp',
+  });
+
+  const invalidPassword = await originalFetch(
+    `${baseUrl}/api/auth/signup/whatsapp/verify`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        phone: '677123456',
+        email: 'person@example.com',
+        password: 'weakpass',
+        code: '123456',
+        role: 'Customer',
+        fullName: 'FixMate Customer',
+        region: 'Littoral',
+        town: 'Douala',
+      }),
+    },
+  );
+  assert.equal(invalidPassword.status, 400);
+  assert.equal(createdAccount, undefined);
+
+  const verify = await originalFetch(
+    `${baseUrl}/api/auth/signup/whatsapp/verify`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        phone: '677123456',
+        email: 'person@example.com',
+        password: 'FixMate2026',
+        code: '123456',
+        role: 'Customer',
+        fullName: 'FixMate Customer',
+        region: 'Littoral',
+        town: 'Douala',
+      }),
+    },
+  );
+  assert.equal(verify.status, 201);
+  assert.deepEqual(await verify.json(), {
+    refreshToken: 'refresh-token',
+  });
+  assert.equal(createdAccount.phone_confirm, true);
+  assert.equal(createdAccount.email_confirm, false);
+  assert.equal(createdAccount.email, 'person@example.com');
+  assert.equal(createdAccount.user_metadata.role, 'Customer');
+});
+
+test('phone login uses confirmed Supabase phone identities directly', async (t) => {
+  const originalEnv = saveEnvironment();
+  const originalFetch = global.fetch;
+  t.after(() => {
+    global.fetch = originalFetch;
+    restoreEnvironment(originalEnv);
+  });
+  configureTestEnvironment();
+  global.fetch = async (input, options = {}) => {
+    const url = new URL(input);
+    if (url.pathname === '/rest/v1/rpc/lookup_profile_user_by_phone') {
+      return Response.json([{ user_id: 'verified-phone-user' }]);
+    }
+    if (url.pathname === '/auth/v1/admin/users/verified-phone-user') {
+      return Response.json({
+        id: 'verified-phone-user',
+        email: 'person@example.com',
+        phone: '+237677123456',
+        phone_confirmed_at: '2026-10-09T00:00:00Z',
+      });
+    }
+    if (
+      url.pathname === '/auth/v1/token' &&
+      url.searchParams.get('grant_type') === 'password'
+    ) {
+      assert.deepEqual(JSON.parse(options.body), {
+        phone: '+237677123456',
+        password: 'FixMate2026',
+      });
+      return Response.json({ refresh_token: 'phone-refresh-token' });
+    }
+    throw new Error(`Unexpected mocked upstream request: ${url}`);
+  };
+
+  const baseUrl = await startServer(t);
+  const response = await originalFetch(`${baseUrl}/api/auth/phone-login`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      phone: '677123456',
+      password: 'FixMate2026',
+    }),
+  });
+  assert.equal(response.status, 200);
+  assert.deepEqual(await response.json(), {
+    refreshToken: 'phone-refresh-token',
+  });
 });
 
 test('accepts only configured plan prices and converts USD to whole FCFA', () => {

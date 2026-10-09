@@ -23,6 +23,7 @@ const plans = {
 };
 const exchangeRateUrl = 'https://open.er-api.com/v6/latest/USD';
 const statusChecks = new Map();
+const whatsappSignupRequests = new Map();
 
 function config(requireFapshi = true) {
   const values = {
@@ -175,6 +176,64 @@ async function getAdminUser(cfg, userId) {
   return readJson(response);
 }
 
+function twilioConfig() {
+  const values = {
+    accountSid: process.env.TWILIO_ACCOUNT_SID,
+    authToken: process.env.TWILIO_AUTH_TOKEN,
+    verifyServiceSid: process.env.TWILIO_VERIFY_SERVICE_SID,
+  };
+  const missing = Object.entries(values)
+    .filter(([, value]) => !value)
+    .map(([name]) => name);
+  if (missing.length) {
+    throw new Error(`Missing required WhatsApp verification settings: ${missing.join(', ')}`);
+  }
+  return values;
+}
+
+async function callTwilioVerify(cfg, action, body) {
+  const url = `https://verify.twilio.com/v2/Services/${encodeURIComponent(cfg.verifyServiceSid)}/${action}`;
+  const credentials = Buffer.from(`${cfg.accountSid}:${cfg.authToken}`).toString('base64');
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: {
+      Authorization: `Basic ${credentials}`,
+      'Content-Type': 'application/x-www-form-urlencoded',
+    },
+    body: new URLSearchParams(body),
+    signal: AbortSignal.timeout(15_000),
+  });
+  const result = await readJson(response);
+  if (!response.ok) {
+    const error = new Error(
+      result.message || 'WhatsApp verification provider request failed.',
+    );
+    error.statusCode = response.status;
+    throw error;
+  }
+  return result;
+}
+
+function allowWhatsappSignupRequest(phone, now = Date.now()) {
+  const recent = (whatsappSignupRequests.get(phone) ?? []).filter(
+    (timestamp) => now - timestamp < 60_000,
+  );
+  if (recent.length >= 1) {
+    whatsappSignupRequests.set(phone, recent);
+    return false;
+  }
+  recent.push(now);
+  whatsappSignupRequests.set(phone, recent);
+  if (whatsappSignupRequests.size > 10_000) {
+    for (const [storedPhone, timestamps] of whatsappSignupRequests) {
+      if (timestamps.every((timestamp) => now - timestamp >= 60_000)) {
+        whatsappSignupRequests.delete(storedPhone);
+      }
+    }
+  }
+  return true;
+}
+
 async function getFapshiTransaction(cfg, transId) {
   const response = await fetch(
     `${cfg.fapshiBaseUrl}/payment-status/${encodeURIComponent(transId)}`,
@@ -321,7 +380,7 @@ function requireSupabaseConfig(req, res, next) {
     next();
   } catch (error) {
     console.error(error.message);
-    res.status(503).json({ error: 'Phone sign-in is not configured.' });
+    res.status(503).json({ error: 'Authentication services are not configured.' });
   }
 }
 
@@ -392,7 +451,11 @@ app.post('/api/auth/phone-login', requireSupabaseConfig, async (req, res) => {
     if (!userId) return res.status(401).json({ error: 'Incorrect phone number or password.' });
 
     const user = await getAdminUser(req.config, userId);
-    if (typeof user.email !== 'string' || !user.email) {
+    const confirmedPhone =
+      typeof user.phone === 'string' &&
+      user.phone_confirmed_at &&
+      normalizeCameroonPhone(user.phone) === phone;
+    if (!confirmedPhone && (typeof user.email !== 'string' || !user.email)) {
       return res.status(401).json({ error: 'Incorrect phone number or password.' });
     }
 
@@ -404,7 +467,11 @@ app.post('/api/auth/phone-login', requireSupabaseConfig, async (req, res) => {
           apikey: req.config.anonKey,
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ email: user.email, password }),
+        body: JSON.stringify(
+          confirmedPhone
+            ? { phone: user.phone, password }
+            : { email: user.email, password },
+        ),
       },
     );
     const result = await readJson(response);
@@ -415,6 +482,164 @@ app.post('/api/auth/phone-login', requireSupabaseConfig, async (req, res) => {
   } catch (error) {
     console.error('Phone sign-in failed:', error.message);
     res.status(503).json({ error: 'Phone sign-in is temporarily unavailable.' });
+  }
+});
+
+app.post('/api/auth/signup/whatsapp/send', requireSupabaseConfig, async (req, res) => {
+  const phone = normalizeCameroonPhone(req.body?.phone);
+  if (!phone) return res.status(400).json({ error: 'Enter a valid Cameroon phone number.' });
+  if (!allowWhatsappSignupRequest(phone)) {
+    return res.status(429).json({ error: 'Wait a minute before requesting another code.' });
+  }
+
+  try {
+    await callTwilioVerify(twilioConfig(), 'Verifications', {
+      To: `+237${phone}`,
+      Channel: 'whatsapp',
+    });
+    res.status(202).json({ sent: true });
+  } catch (error) {
+    console.error('WhatsApp signup code delivery failed:', error.message);
+    res.status(503).json({
+      error: 'Could not send a WhatsApp code. Check the number and try again.',
+    });
+  }
+});
+
+app.post('/api/auth/signup/whatsapp/verify', requireSupabaseConfig, async (req, res) => {
+  const phone = normalizeCameroonPhone(req.body?.phone);
+  const { email, password, code, role, fullName, region, town } = req.body ?? {};
+  const emailAddress = typeof email === 'string' ? email.trim().toLowerCase() : '';
+  const supportedRoles = new Set(['Customer', 'Technician', 'Supplier']);
+  const services = req.body.services;
+  const categories = req.body.categories;
+  const additionalPhone = req.body.additionalPhone;
+  const normalizedAdditionalPhone =
+    typeof additionalPhone === 'string' && additionalPhone.trim()
+      ? normalizeCameroonPhone(additionalPhone)
+      : null;
+  if (
+    !phone ||
+    !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(emailAddress) ||
+    typeof password !== 'string' ||
+    password.length < 8 ||
+    password.length > 256 ||
+    !/[A-Z]/.test(password) ||
+    !/[a-z]/.test(password) ||
+    !/[0-9]/.test(password) ||
+    typeof code !== 'string' ||
+    !/^\d{6}$/.test(code) ||
+    !supportedRoles.has(role) ||
+    typeof fullName !== 'string' ||
+    !fullName.trim() ||
+    fullName.length > 120 ||
+    typeof region !== 'string' ||
+    !region.trim() ||
+    region.length > 80 ||
+    typeof town !== 'string' ||
+    !town.trim() ||
+    town.length > 80 ||
+    (services !== undefined &&
+      (!Array.isArray(services) ||
+        services.length > 50 ||
+        services.some((value) => typeof value !== 'string' || value.length > 100))) ||
+    (categories !== undefined &&
+      (!Array.isArray(categories) ||
+        categories.length > 50 ||
+        categories.some((value) => typeof value !== 'string' || value.length > 100))) ||
+    (role === 'Technician' && (!Array.isArray(services) || services.length === 0)) ||
+    (role === 'Supplier' && (!Array.isArray(categories) || categories.length === 0)) ||
+    (additionalPhone &&
+      typeof additionalPhone === 'string' &&
+      !normalizedAdditionalPhone) ||
+    (additionalPhone !== undefined && typeof additionalPhone !== 'string')
+  ) {
+    return res.status(400).json({ error: 'Please check the signup details and verification code.' });
+  }
+
+  try {
+    const verifyResult = await callTwilioVerify(twilioConfig(), 'VerificationCheck', {
+      To: `+237${phone}`,
+      Code: code,
+    });
+    if (verifyResult.status !== 'approved') {
+      return res.status(400).json({ error: 'The WhatsApp code is invalid or has expired.' });
+    }
+
+    const userMetadata = {
+      role,
+      full_name: fullName.trim(),
+      phone,
+      region,
+      town,
+      location: `${town}, ${region}`,
+    };
+    if (services !== undefined) userMetadata.services = services;
+    if (categories !== undefined) userMetadata.categories = categories;
+    if (normalizedAdditionalPhone) {
+      userMetadata.additional_phone = normalizedAdditionalPhone;
+    }
+
+    const createResponse = await fetch(
+      `${req.config.supabaseUrl}/auth/v1/admin/users`,
+      {
+        method: 'POST',
+        headers: serviceHeaders(req.config),
+        body: JSON.stringify({
+          email: emailAddress,
+          email_confirm: false,
+          password,
+          phone: `+237${phone}`,
+          phone_confirm: true,
+          user_metadata: userMetadata,
+        }),
+      },
+    );
+    const createdUser = await readJson(createResponse);
+    if (!createResponse.ok) {
+      const details = String(createdUser.message || createdUser.msg || '').toLowerCase();
+      if (details.includes('already') || details.includes('exists')) {
+        return res.status(409).json({
+          error: 'An account with this email or phone number already exists.',
+        });
+      }
+      throw new Error('Supabase could not create the verified account.');
+    }
+
+    const sessionResponse = await fetch(
+      `${req.config.supabaseUrl}/auth/v1/token?grant_type=password`,
+      {
+        method: 'POST',
+        headers: {
+          apikey: req.config.anonKey,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ phone: `+237${phone}`, password }),
+      },
+    );
+    const session = await readJson(sessionResponse);
+    if (
+      !sessionResponse.ok ||
+      typeof session.access_token !== 'string' ||
+      typeof session.refresh_token !== 'string'
+    ) {
+      await fetch(
+        `${req.config.supabaseUrl}/auth/v1/admin/users/${encodeURIComponent(createdUser.id)}`,
+        { method: 'DELETE', headers: serviceHeaders(req.config) },
+      );
+      throw new Error('Supabase could not start a session for the verified account.');
+    }
+    res.status(201).json({
+      refreshToken: session.refresh_token,
+    });
+  } catch (error) {
+    if ([400, 404].includes(error.statusCode)) {
+      return res.status(400).json({
+        error: 'The WhatsApp code is invalid or has expired.',
+      });
+    }
+    console.error('WhatsApp signup verification failed:', error.message);
+    res.status(503).json({ error: 'Could not complete signup. Please try again.' });
   }
 });
 

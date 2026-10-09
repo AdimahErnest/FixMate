@@ -4,7 +4,13 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../app_state.dart';
 import '../theme.dart';
+import '../utils.dart';
 import 'common.dart';
+
+enum SignupVerificationMethod { email, whatsapp }
+
+bool isValidSignupEmail(String email) =>
+    RegExp(r'^[^@\s]+@[^@\s]+\.[^@\s]+$').hasMatch(email.trim());
 
 String? validateSignupFields({
   required String name,
@@ -15,8 +21,7 @@ String? validateSignupFields({
   String? additionalPhone,
 }) {
   if (name.trim().isEmpty) return 'Please enter your name.';
-  if (!RegExp(r'^[^@\s]+@[^@\s]+\.[^@\s]+$')
-      .hasMatch(email.trim())) {
+  if (!isValidSignupEmail(email)) {
     return 'Please enter a valid email address.';
   }
   if (normalizeSignupPhone(phone) == null) {
@@ -39,6 +44,23 @@ bool isStrongSignupPassword(String password) =>
     RegExp(r'[A-Z]').hasMatch(password) &&
     RegExp(r'[a-z]').hasMatch(password) &&
     RegExp(r'[0-9]').hasMatch(password);
+
+String? validateSignupLocation({
+  required String? region,
+  required String? town,
+}) {
+  if (region == null || !cameroonRegions.containsKey(region)) {
+    return 'Please select your region.';
+  }
+  if (town == null || !cameroonRegions[region]!.contains(town)) {
+    return 'Please select a town in your region.';
+  }
+  return null;
+}
+
+bool isValidRecoveryCode(String code) => RegExp(r'^\d{6,8}$').hasMatch(code);
+
+bool isValidSignupCode(String code) => RegExp(r'^\d{6}$').hasMatch(code);
 
 String? normalizeSignupPhone(String value) {
   var digits = value.replaceAll(RegExp(r'\D'), '');
@@ -65,16 +87,11 @@ class SignupScaffold extends StatelessWidget {
     return Scaffold(
       appBar: AppBar(
         title: Text(title),
-        actions: const [
-          LanguageButton(),
-          ThemeButton(),
-        ],
+        actions: const [LanguageButton(), ThemeButton()],
       ),
       body: SingleChildScrollView(
         padding: const EdgeInsets.all(20),
-        child: Column(
-          children: children,
-        ),
+        child: Column(children: children),
       ),
     );
   }
@@ -84,11 +101,7 @@ class SignupHeader extends StatelessWidget {
   final String title;
   final String subtitle;
 
-  const SignupHeader({
-    super.key,
-    required this.title,
-    required this.subtitle,
-  });
+  const SignupHeader({super.key, required this.title, required this.subtitle});
 
   @override
   Widget build(BuildContext context) {
@@ -101,20 +114,14 @@ class SignupHeader extends StatelessWidget {
         Text(
           title,
           textAlign: TextAlign.center,
-          style: Theme.of(context)
-              .textTheme
-              .headlineSmall
-              ?.copyWith(
-                fontWeight: FontWeight.bold,
-              ),
+          style: Theme.of(
+            context,
+          ).textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.bold),
         ),
 
         const SizedBox(height: 8),
 
-        Text(
-          subtitle,
-          textAlign: TextAlign.center,
-        ),
+        Text(subtitle, textAlign: TextAlign.center),
 
         const SizedBox(height: 25),
       ],
@@ -141,9 +148,7 @@ class SignupField extends StatelessWidget {
       child: TextField(
         controller: controller,
         keyboardType: keyboardType,
-        decoration: InputDecoration(
-          labelText: label,
-        ),
+        decoration: InputDecoration(labelText: label),
       ),
     );
   }
@@ -153,14 +158,11 @@ class PasswordField extends StatelessWidget {
   final String label;
   final TextEditingController? controller;
 
-  const PasswordField({
-    super.key,
-    required this.label,
-    this.controller,
-  });
+  const PasswordField({super.key, required this.label, this.controller});
 
   @override
   Widget build(BuildContext context) {
+    final t = context.watch<AppState>().tr;
     return Padding(
       padding: const EdgeInsets.only(bottom: 14),
       child: TextField(
@@ -168,54 +170,147 @@ class PasswordField extends StatelessWidget {
         obscureText: true,
         decoration: InputDecoration(
           labelText: label,
-          prefixIcon:
-              const Icon(Icons.lock_outline),
+          prefixIcon: const Icon(Icons.lock_outline),
+          helperText: t(
+            'At least 8 characters, with uppercase, lowercase, and a number.',
+          ),
         ),
       ),
     );
   }
 }
 
-class DropdownField extends StatelessWidget {
-  final String label;
+class SignupVerificationSelector extends StatelessWidget {
+  final SignupVerificationMethod value;
+  final ValueChanged<SignupVerificationMethod> onChanged;
 
-  const DropdownField({
+  const SignupVerificationSelector({
     super.key,
-    required this.label,
+    required this.value,
+    required this.onChanged,
   });
 
   @override
   Widget build(BuildContext context) {
     final t = context.watch<AppState>().tr;
-
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 14),
-      child: DropdownButtonFormField<String>(
-        initialValue: 'Option',
-        decoration: InputDecoration(
-          labelText: label,
-        ),
-        items: [
-          DropdownMenuItem(
-            value: 'Option',
-            child: Text(t('Select')),
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Padding(
+          padding: const EdgeInsets.only(bottom: 8),
+          child: Text(
+            t('Verify account with'),
+            style: Theme.of(
+              context,
+            ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w600),
           ),
-        ],
-        onChanged: (_) {},
-      ),
+        ),
+        RadioGroup<SignupVerificationMethod>(
+          groupValue: value,
+          onChanged: (selection) {
+            if (selection != null) onChanged(selection);
+          },
+          child: Column(
+            children: [
+              RadioListTile<SignupVerificationMethod>(
+                contentPadding: EdgeInsets.zero,
+                title: Text(t('Email code')),
+                value: SignupVerificationMethod.email,
+              ),
+              RadioListTile<SignupVerificationMethod>(
+                contentPadding: EdgeInsets.zero,
+                title: Text(t('WhatsApp code')),
+                value: SignupVerificationMethod.whatsapp,
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class SignupLocationFields extends StatelessWidget {
+  final String? region;
+  final String? town;
+  final ValueChanged<String?> onRegionChanged;
+  final ValueChanged<String?> onTownChanged;
+
+  const SignupLocationFields({
+    super.key,
+    required this.region,
+    required this.town,
+    required this.onRegionChanged,
+    required this.onTownChanged,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final t = context.watch<AppState>().tr;
+    final towns = region == null ? const <String>[] : cameroonRegions[region]!;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Padding(
+          padding: const EdgeInsets.only(bottom: 8),
+          child: Text(
+            t('Your location'),
+            style: Theme.of(
+              context,
+            ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w600),
+          ),
+        ),
+        Padding(
+          padding: const EdgeInsets.only(bottom: 12),
+          child: Text(
+            t('Select a region first, then choose your town.'),
+            style: Theme.of(context).textTheme.bodySmall,
+          ),
+        ),
+        Padding(
+          padding: const EdgeInsets.only(bottom: 14),
+          child: DropdownButtonFormField<String>(
+            initialValue: region,
+            decoration: InputDecoration(
+              labelText: t('Region'),
+              prefixIcon: const Icon(Icons.map_outlined),
+            ),
+            items: cameroonRegions.keys
+                .map(
+                  (value) =>
+                      DropdownMenuItem(value: value, child: Text(t(value))),
+                )
+                .toList(),
+            onChanged: onRegionChanged,
+          ),
+        ),
+        Padding(
+          padding: const EdgeInsets.only(bottom: 14),
+          child: DropdownButtonFormField<String>(
+            initialValue: towns.contains(town) ? town : null,
+            decoration: InputDecoration(
+              labelText: t('Town'),
+              prefixIcon: const Icon(Icons.location_city_outlined),
+            ),
+            items: towns
+                .map(
+                  (value) => DropdownMenuItem(value: value, child: Text(value)),
+                )
+                .toList(),
+            onChanged: region == null ? null : onTownChanged,
+          ),
+        ),
+      ],
     );
   }
 }
 
 class SignupButton extends StatelessWidget {
   final String text;
-  final VoidCallback onPressed;
+  final VoidCallback? onPressed;
 
-  const SignupButton({
-    super.key,
-    required this.text,
-    required this.onPressed,
-  });
+  const SignupButton({super.key, required this.text, required this.onPressed});
 
   @override
   Widget build(BuildContext context) {
@@ -224,12 +319,9 @@ class SignupButton extends StatelessWidget {
       child: ElevatedButton(
         onPressed: onPressed,
         style: ElevatedButton.styleFrom(
-          backgroundColor: FixMateTheme.gold,
+          backgroundColor: FixMateTheme.buttonGold,
           foregroundColor: Colors.white,
-          padding:
-              const EdgeInsets.symmetric(
-            vertical: 16,
-          ),
+          padding: const EdgeInsets.symmetric(vertical: 16),
         ),
         child: Text(text),
       ),

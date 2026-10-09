@@ -538,7 +538,7 @@ class _CartPageState extends State<CartPage> {
                               ? null
                               : () => checkout(state),
                           style: ElevatedButton.styleFrom(
-                            backgroundColor: FixMateTheme.gold,
+                            backgroundColor: FixMateTheme.buttonGold,
                             foregroundColor: Colors.white,
                             padding: const EdgeInsets.symmetric(vertical: 16),
                           ),

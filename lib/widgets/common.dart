@@ -1,10 +1,49 @@
 // FixMate — small shared widgets used across pages
 
+import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../app_state.dart';
 import '../theme.dart';
 import '../utils.dart';
+
+class GlassPanel extends StatelessWidget {
+  final Widget child;
+  final BorderRadius borderRadius;
+  final EdgeInsetsGeometry padding;
+
+  const GlassPanel({
+    super.key,
+    required this.child,
+    this.borderRadius = const BorderRadius.all(Radius.circular(18)),
+    this.padding = EdgeInsets.zero,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    return ClipRRect(
+      borderRadius: borderRadius,
+      child: BackdropFilter(
+        filter: ImageFilter.blur(sigmaX: 14, sigmaY: 14),
+        child: DecoratedBox(
+          decoration: BoxDecoration(
+            color: isDark
+                ? Colors.white.withValues(alpha: .075)
+                : Colors.white.withValues(alpha: .58),
+            borderRadius: borderRadius,
+            border: Border.all(
+              color: isDark
+                  ? Colors.white.withValues(alpha: .14)
+                  : Colors.white.withValues(alpha: .8),
+            ),
+          ),
+          child: Padding(padding: padding, child: child),
+        ),
+      ),
+    );
+  }
+}
 
 class FixMateLogo extends StatelessWidget {
   final double size;
@@ -106,12 +145,9 @@ class RoleCard extends StatelessWidget {
           padding: const EdgeInsets.all(18),
           child: Row(
             children: [
-              CircleAvatar(
-                radius: 28,
-                backgroundColor:
-                    FixMateTheme.gold.withValues(
-                  alpha: .15,
-                ),
+              GlassPanel(
+                borderRadius: BorderRadius.circular(20),
+                padding: const EdgeInsets.all(13),
                 child: Icon(
                   icon,
                   color: FixMateTheme.gold,

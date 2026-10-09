@@ -14,13 +14,14 @@ String normalizeSearch(String input) {
 }
 
 const Map<String, List<String>> cameroonRegions = {
-  'Littoral': ['Douala', 'Nkongsamba', 'Edéa'],
-  'Centre': ['Yaoundé', 'Mbalmayo', 'Obala'],
-  'West': ['Bafoussam', 'Dschang', 'Bamendjou'],
-  'Southwest': ['Buea', 'Limbe', 'Kumba'],
-  'Northwest': ['Bamenda'],
-  'South': ['Ebolowa', 'Kribi'],
-  'East': ['Bertoua'],
-  'North': ['Garoua', 'Maroua'],
-  'Adamawa': ['Ngaoundéré'],
+  'Adamawa': ['Ngaoundéré', 'Banyo', 'Tibati', 'Tignère'],
+  'Centre': ['Yaoundé', 'Mbalmayo', 'Obala', 'Bafia', 'Akonolinga'],
+  'East': ['Bertoua', 'Abong-Mbang', 'Batouri', 'Yokadouma'],
+  'Far North': ['Maroua', 'Kousséri', 'Mokolo', 'Yagoua', 'Mora'],
+  'Littoral': ['Douala', 'Nkongsamba', 'Edéa', 'Mbanga', 'Manjo'],
+  'North': ['Garoua', 'Guider', 'Poli', 'Figuil'],
+  'Northwest': ['Bamenda', 'Kumbo', 'Wum', 'Ndop'],
+  'South': ['Ebolowa', 'Kribi', 'Sangmélima', 'Ambam'],
+  'Southwest': ['Buea', 'Limbe', 'Kumba', 'Mamfe', 'Tiko'],
+  'West': ['Bafoussam', 'Dschang', 'Bamendjou', 'Mbouda', 'Foumban', 'Bafang'],
 };

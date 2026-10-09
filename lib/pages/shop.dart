@@ -247,7 +247,7 @@ class _ShopPageState extends State<ShopPage> {
                         top: 3,
                         child: CircleAvatar(
                           radius: 9,
-                          backgroundColor: FixMateTheme.gold,
+                          backgroundColor: FixMateTheme.buttonGold,
                           foregroundColor: Colors.white,
                           child: Text(
                             '${state.cartCount}',

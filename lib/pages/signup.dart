@@ -1,30 +1,30 @@
 // FixMate — Customer, Technician and Supplier signup pages
 import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import '../app_state.dart';
 import '../theme.dart';
 import '../widgets/signup_helpers.dart';
 import 'navigation.dart';
 
-class CustomerSignupPage
-    extends StatefulWidget {
+class CustomerSignupPage extends StatefulWidget {
   const CustomerSignupPage({super.key});
 
   @override
-  State<CustomerSignupPage> createState() =>
-      _CustomerSignupPageState();
+  State<CustomerSignupPage> createState() => _CustomerSignupPageState();
 }
 
-class _CustomerSignupPageState
-    extends State<CustomerSignupPage> {
+class _CustomerSignupPageState extends State<CustomerSignupPage> {
   final firstName = TextEditingController();
   final lastName = TextEditingController();
   final phone = TextEditingController();
   final email = TextEditingController();
   final password = TextEditingController();
-  final confirmPassword =
-      TextEditingController();
+  final confirmPassword = TextEditingController();
+  String? selectedRegion;
+  String? selectedTown;
+  SignupVerificationMethod verificationMethod = SignupVerificationMethod.email;
 
   @override
   void dispose() {
@@ -37,40 +37,67 @@ class _CustomerSignupPageState
     super.dispose();
   }
 
-   Future<void> register() async {
+  Future<void> register() async {
     final state = context.read<AppState>();
     final t = state.tr;
-     final validation = validateSignupFields(
-       name: '${firstName.text.trim()} ${lastName.text.trim()}',
-       email: email.text,
-       phone: phone.text,
-       password: password.text,
-       confirmPassword: confirmPassword.text,
-     );
-     if (validation != null) {
-       ScaffoldMessenger.of(context).showSnackBar(
-         SnackBar(content: Text(t(validation))),
-       );
-       return;
-     }
-    
-    showDialog(context: context, barrierDismissible: false, builder: (_) => const Center(child: CircularProgressIndicator()));
-    
-    final success = await state.signUpSupabase(
+    final validation = validateSignupFields(
+      name: '${firstName.text.trim()} ${lastName.text.trim()}',
+      email: email.text,
+      phone: phone.text,
+      password: password.text,
+      confirmPassword: confirmPassword.text,
+    );
+    if (validation != null) {
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(t(validation))));
+      return;
+    }
+    final locationValidation = validateSignupLocation(
+      region: selectedRegion,
+      town: selectedTown,
+    );
+    if (locationValidation != null) {
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(t(locationValidation))));
+      return;
+    }
+
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) => const Center(child: CircularProgressIndicator()),
+    );
+
+    final success = await state.beginSignupVerification(
       email: email.text.trim().toLowerCase(),
       password: password.text,
       role: 'Customer',
+      verificationMethod: verificationMethod.name,
       fullName: '${firstName.text.trim()} ${lastName.text.trim()}',
       phone: normalizeSignupPhone(phone.text)!,
+      region: selectedRegion,
+      town: selectedTown,
     );
-    
+
     if (mounted) Navigator.pop(context); // Close loader
 
     if (success && mounted) {
-     // Keep this to update local UI state immediately
-      Navigator.pushAndRemoveUntil(context, MaterialPageRoute(builder: (_) => const MainNavigation()), (route) => false);
+      Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (_) => SignupVerificationPage(
+            destination: verificationMethod == SignupVerificationMethod.email
+                ? email.text.trim()
+                : phone.text.trim(),
+          ),
+        ),
+      );
     } else if (mounted) {
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(t(state.authError))));
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(t(state.authError))));
     }
   }
 
@@ -83,20 +110,12 @@ class _CustomerSignupPageState
       children: [
         SignupHeader(
           title: t('Create customer account'),
-          subtitle: t(
-            'Find trusted technicians and buy products on FixMate.',
-          ),
+          subtitle: t('Find trusted technicians and buy products on FixMate.'),
         ),
 
-        SignupField(
-          label: t('First name'),
-          controller: firstName,
-        ),
+        SignupField(label: t('First name'), controller: firstName),
 
-        SignupField(
-          label: t('Last name'),
-          controller: lastName,
-        ),
+        SignupField(label: t('Last name'), controller: lastName),
 
         SignupField(
           label: t('Phone number'),
@@ -107,14 +126,25 @@ class _CustomerSignupPageState
         SignupField(
           label: t('Email'),
           controller: email,
-          keyboardType:
-              TextInputType.emailAddress,
+          keyboardType: TextInputType.emailAddress,
         ),
 
-        PasswordField(
-          label: t('Password'),
-          controller: password,
+        SignupVerificationSelector(
+          value: verificationMethod,
+          onChanged: (value) => setState(() => verificationMethod = value),
         ),
+
+        SignupLocationFields(
+          region: selectedRegion,
+          town: selectedTown,
+          onRegionChanged: (value) => setState(() {
+            selectedRegion = value;
+            selectedTown = null;
+          }),
+          onTownChanged: (value) => setState(() => selectedTown = value),
+        ),
+
+        PasswordField(label: t('Password'), controller: password),
 
         PasswordField(
           label: t('Confirm password'),
@@ -123,24 +153,19 @@ class _CustomerSignupPageState
 
         const SizedBox(height: 10),
 
-        SignupButton(
-          text: t('CREATE CUSTOMER ACCOUNT'),
-          onPressed: register,
-        ),
+        SignupButton(text: t('CREATE CUSTOMER ACCOUNT'), onPressed: register),
       ],
     );
   }
 }
 
-
-class TechnicianSignupPage
-    extends StatefulWidget {
+class TechnicianSignupPage extends StatefulWidget {
   const TechnicianSignupPage({super.key});
 
   @override
-  State<TechnicianSignupPage> createState() =>
-      _TechnicianSignupPageState();
+  State<TechnicianSignupPage> createState() => _TechnicianSignupPageState();
 }
+
 class _TechnicianSignupPageState extends State<TechnicianSignupPage> {
   final firstName = TextEditingController();
   final lastName = TextEditingController();
@@ -150,6 +175,9 @@ class _TechnicianSignupPageState extends State<TechnicianSignupPage> {
   final confirmPassword = TextEditingController();
 
   final Set<String> selectedServices = {};
+  String? selectedRegion;
+  String? selectedTown;
+  SignupVerificationMethod verificationMethod = SignupVerificationMethod.email;
 
   final List<String> services = [
     'Electricity',
@@ -193,9 +221,19 @@ class _TechnicianSignupPageState extends State<TechnicianSignupPage> {
       confirmPassword: confirmPassword.text,
     );
     if (validation != null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(t(validation))),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(t(validation))));
+      return;
+    }
+    final locationValidation = validateSignupLocation(
+      region: selectedRegion,
+      town: selectedTown,
+    );
+    if (locationValidation != null) {
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(t(locationValidation))));
       return;
     }
     if (selectedServices.isEmpty) {
@@ -211,12 +249,15 @@ class _TechnicianSignupPageState extends State<TechnicianSignupPage> {
       builder: (_) => const Center(child: CircularProgressIndicator()),
     );
 
-    final success = await state.signUpSupabase(
+    final success = await state.beginSignupVerification(
       email: email.text.trim().toLowerCase(),
       password: password.text,
       role: 'Technician',
+      verificationMethod: verificationMethod.name,
       fullName: '${firstName.text.trim()} ${lastName.text.trim()}',
       phone: normalizeSignupPhone(phone.text)!,
+      region: selectedRegion,
+      town: selectedTown,
       services: selectedServices.toList(),
     );
 
@@ -224,15 +265,20 @@ class _TechnicianSignupPageState extends State<TechnicianSignupPage> {
     Navigator.pop(context); // close loader
 
     if (success) {
-      Navigator.pushAndRemoveUntil(
+      Navigator.push(
         context,
-        MaterialPageRoute(builder: (_) => const MainNavigation()),
-        (route) => false,
+        MaterialPageRoute(
+          builder: (_) => SignupVerificationPage(
+            destination: verificationMethod == SignupVerificationMethod.email
+                ? email.text.trim()
+                : phone.text.trim(),
+          ),
+        ),
       );
     } else {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(t(state.authError))),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(t(state.authError))));
     }
   }
 
@@ -260,8 +306,24 @@ class _TechnicianSignupPageState extends State<TechnicianSignupPage> {
           controller: email,
           keyboardType: TextInputType.emailAddress,
         ),
+        SignupVerificationSelector(
+          value: verificationMethod,
+          onChanged: (value) => setState(() => verificationMethod = value),
+        ),
+        SignupLocationFields(
+          region: selectedRegion,
+          town: selectedTown,
+          onRegionChanged: (value) => setState(() {
+            selectedRegion = value;
+            selectedTown = null;
+          }),
+          onTownChanged: (value) => setState(() => selectedTown = value),
+        ),
         PasswordField(label: t('Password'), controller: password),
-        PasswordField(label: t('Confirm password'), controller: confirmPassword),
+        PasswordField(
+          label: t('Confirm password'),
+          controller: confirmPassword,
+        ),
         const SizedBox(height: 10),
         Align(
           alignment: Alignment.centerLeft,
@@ -293,35 +355,30 @@ class _TechnicianSignupPageState extends State<TechnicianSignupPage> {
           }).toList(),
         ),
         const SizedBox(height: 20),
-        SignupButton(
-          text: t('CREATE TECHNICIAN ACCOUNT'),
-          onPressed: register,
-        ),
+        SignupButton(text: t('CREATE TECHNICIAN ACCOUNT'), onPressed: register),
       ],
     );
   }
 }
 
-
-class SupplierSignupPage
-    extends StatefulWidget {
+class SupplierSignupPage extends StatefulWidget {
   const SupplierSignupPage({super.key});
 
   @override
-  State<SupplierSignupPage> createState() =>
-      _SupplierSignupPageState();
+  State<SupplierSignupPage> createState() => _SupplierSignupPageState();
 }
 
-class _SupplierSignupPageState
-    extends State<SupplierSignupPage> {
+class _SupplierSignupPageState extends State<SupplierSignupPage> {
   final password = TextEditingController();
   final confirmPassword = TextEditingController();
   final company = TextEditingController();
   final email = TextEditingController();
   final phone = TextEditingController();
-  final additionalPhone =
-      TextEditingController();
+  final additionalPhone = TextEditingController();
   final Set<String> selectedItems = {};
+  String? selectedRegion;
+  String? selectedTown;
+  SignupVerificationMethod verificationMethod = SignupVerificationMethod.email;
 
   final List<String> categories = [
     'Electrical Materials',
@@ -356,10 +413,9 @@ class _SupplierSignupPageState
     phone.dispose();
     additionalPhone.dispose();
     super.dispose();
-    
   }
 
-    Future<void> register() async {
+  Future<void> register() async {
     final state = context.read<AppState>();
     final t = state.tr;
     final validation = validateSignupFields(
@@ -371,37 +427,68 @@ class _SupplierSignupPageState
       additionalPhone: additionalPhone.text,
     );
     if (validation != null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(t(validation))),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(t(validation))));
+      return;
+    }
+    final locationValidation = validateSignupLocation(
+      region: selectedRegion,
+      town: selectedTown,
+    );
+    if (locationValidation != null) {
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(t(locationValidation))));
       return;
     }
     if (selectedItems.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(t('Please select at least one supply category.'))),
+        SnackBar(
+          content: Text(t('Please select at least one supply category.')),
+        ),
       );
       return;
     }
-    showDialog(context: context, barrierDismissible: false, builder: (_) => const Center(child: CircularProgressIndicator()));
-    
-    final success = await state.signUpSupabase(
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) => const Center(child: CircularProgressIndicator()),
+    );
+
+    final success = await state.beginSignupVerification(
       email: email.text.trim().toLowerCase(),
       password: password.text,
       role: 'Supplier',
-      fullName: company.text.trim().isEmpty ? 'FixMate Supplier' : company.text.trim(),
+      verificationMethod: verificationMethod.name,
+      fullName: company.text.trim().isEmpty
+          ? 'FixMate Supplier'
+          : company.text.trim(),
       phone: normalizeSignupPhone(phone.text)!,
+      region: selectedRegion,
+      town: selectedTown,
       categories: selectedItems.toList(),
       additionalPhone: additionalPhone.text.trim().isEmpty
           ? null
           : normalizeSignupPhone(additionalPhone.text),
     );
-    
+
     if (mounted) Navigator.pop(context);
     if (success && mounted) {
-    
-      Navigator.pushAndRemoveUntil(context, MaterialPageRoute(builder: (_) => const MainNavigation()), (route) => false);
+      Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (_) => SignupVerificationPage(
+            destination: verificationMethod == SignupVerificationMethod.email
+                ? email.text.trim()
+                : phone.text.trim(),
+          ),
+        ),
+      );
     } else if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(t(state.authError))));
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(t(state.authError))));
     }
   }
 
@@ -415,21 +502,15 @@ class _SupplierSignupPageState
       children: [
         SignupHeader(
           title: t('Create supplier account'),
-          subtitle: t(
-            'Sell tools, equipment, spare parts and materials.',
-          ),
+          subtitle: t('Sell tools, equipment, spare parts and materials.'),
         ),
 
-        SignupField(
-          label: t('Company name'),
-          controller: company,
-        ),
+        SignupField(label: t('Company name'), controller: company),
 
         SignupField(
           label: t('Email'),
           controller: email,
-          keyboardType:
-              TextInputType.emailAddress,
+          keyboardType: TextInputType.emailAddress,
         ),
 
         SignupField(
@@ -444,18 +525,33 @@ class _SupplierSignupPageState
           keyboardType: TextInputType.phone,
         ),
 
+        SignupVerificationSelector(
+          value: verificationMethod,
+          onChanged: (value) => setState(() => verificationMethod = value),
+        ),
+
+        SignupLocationFields(
+          region: selectedRegion,
+          town: selectedTown,
+          onRegionChanged: (value) => setState(() {
+            selectedRegion = value;
+            selectedTown = null;
+          }),
+          onTownChanged: (value) => setState(() => selectedTown = value),
+        ),
+
         const SizedBox(height: 10),
-          PasswordField(label: t('Password'), controller: password),
-          PasswordField(label: t('Confirm password'), controller: confirmPassword),
-          const SizedBox(height: 10),
+        PasswordField(label: t('Password'), controller: password),
+        PasswordField(
+          label: t('Confirm password'),
+          controller: confirmPassword,
+        ),
+        const SizedBox(height: 10),
         Align(
           alignment: Alignment.centerLeft,
           child: Text(
             t('Items you supply'),
-            style: const TextStyle(
-              fontSize: 17,
-              fontWeight: FontWeight.bold,
-            ),
+            style: const TextStyle(fontSize: 17, fontWeight: FontWeight.bold),
           ),
         ),
 
@@ -465,8 +561,7 @@ class _SupplierSignupPageState
           spacing: 8,
           runSpacing: 8,
           children: categories.map((item) {
-            final selected =
-                selectedItems.contains(item);
+            final selected = selectedItems.contains(item);
 
             return FilterChip(
               label: Text(t(item)),
@@ -480,27 +575,12 @@ class _SupplierSignupPageState
                   }
                 });
               },
-              selectedColor:
-                  FixMateTheme.gold.withValues(
-                alpha: .25,
-              ),
+              selectedColor: FixMateTheme.gold.withValues(alpha: .25),
             );
           }).toList(),
         ),
 
         const SizedBox(height: 20),
-
-        DropdownField(
-          label: t('Location'),
-        ),
-
-        DropdownField(
-          label: t('Region'),
-        ),
-
-        DropdownField(
-          label: t('Town'),
-        ),
 
         const SizedBox(height: 5),
 
@@ -509,16 +589,126 @@ class _SupplierSignupPageState
             'Business verification documents can be submitted after registration.',
           ),
           textAlign: TextAlign.center,
-          style: Theme.of(context)
-              .textTheme
-              .bodySmall,
+          style: Theme.of(context).textTheme.bodySmall,
         ),
 
         const SizedBox(height: 20),
 
+        SignupButton(text: t('CREATE SUPPLIER ACCOUNT'), onPressed: register),
+      ],
+    );
+  }
+}
+
+class SignupVerificationPage extends StatefulWidget {
+  final String destination;
+
+  const SignupVerificationPage({super.key, required this.destination});
+
+  @override
+  State<SignupVerificationPage> createState() => _SignupVerificationPageState();
+}
+
+class _SignupVerificationPageState extends State<SignupVerificationPage> {
+  final codeController = TextEditingController();
+  bool verifying = false;
+  bool resending = false;
+
+  @override
+  void dispose() {
+    codeController.dispose();
+    super.dispose();
+  }
+
+  Future<void> verify() async {
+    final state = context.read<AppState>();
+    final t = state.tr;
+    if (!isValidSignupCode(codeController.text.trim())) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(t('Enter the 6-digit verification code.'))),
+      );
+      return;
+    }
+    setState(() => verifying = true);
+    final success = await state.verifySignupCode(codeController.text.trim());
+    if (!mounted) return;
+    setState(() => verifying = false);
+    if (success) {
+      Navigator.pushAndRemoveUntil(
+        context,
+        MaterialPageRoute(builder: (_) => const MainNavigation()),
+        (route) => false,
+      );
+    } else {
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(t(state.authError))));
+    }
+  }
+
+  Future<void> resend() async {
+    final state = context.read<AppState>();
+    final success = await state.resendSignupCode();
+    if (!mounted) return;
+    setState(() => resending = false);
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          success
+              ? state.tr('A new verification code has been sent.')
+              : state.tr(state.authError),
+        ),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final t = context.watch<AppState>().tr;
+    return SignupScaffold(
+      title: t('Verify your account'),
+      children: [
+        SignupHeader(
+          title: t('Enter your verification code'),
+          subtitle: t('We sent a six-digit code to'),
+        ),
+        Text(
+          widget.destination,
+          textAlign: TextAlign.center,
+          style: Theme.of(context).textTheme.titleMedium,
+        ),
+        const SizedBox(height: 8),
+        Text(
+          t('If you do not receive it, check the address or number and try again.'),
+          textAlign: TextAlign.center,
+          style: Theme.of(context).textTheme.bodySmall,
+        ),
+        const SizedBox(height: 24),
+        TextField(
+          controller: codeController,
+          keyboardType: TextInputType.number,
+          autofillHints: const [AutofillHints.oneTimeCode],
+          inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+          maxLength: 6,
+          textAlign: TextAlign.center,
+          decoration: InputDecoration(
+            labelText: t('6-digit verification code'),
+            prefixIcon: const Icon(Icons.verified_user_outlined),
+          ),
+        ),
+        const SizedBox(height: 16),
         SignupButton(
-          text: t('CREATE SUPPLIER ACCOUNT'),
-          onPressed: register,
+          text: t('VERIFY AND CREATE ACCOUNT'),
+          onPressed: verifying ? null : verify,
+        ),
+        TextButton(
+          onPressed: resending
+              ? null
+              : () {
+                  setState(() => resending = true);
+                  resend();
+                },
+          child: Text(t('Resend code')),
         ),
       ],
     );

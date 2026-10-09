@@ -483,7 +483,7 @@ class _TechnicianProfilePageState extends State<TechnicianProfilePage> {
                     : const Icon(Icons.send),
                 label: Text(t('REQUEST SERVICE')),
                 style: ElevatedButton.styleFrom(
-                  backgroundColor: FixMateTheme.gold,
+                  backgroundColor: FixMateTheme.buttonGold,
                   foregroundColor: Colors.white,
                   padding: const EdgeInsets.symmetric(vertical: 15),
                 ),

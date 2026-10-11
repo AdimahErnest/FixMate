@@ -1177,8 +1177,8 @@ class AppState extends ChangeNotifier {
       if (normalizedTown.isNotEmpty) 'town': normalizedTown,
       if (normalizedRegion.isNotEmpty && normalizedTown.isNotEmpty)
         'location': '$normalizedTown, $normalizedRegion',
-      if (services != null) 'services': services,
-      if (categories != null) 'categories': categories,
+      'services': services ?? const [],
+      'categories': categories ?? const [],
       if (normalizedAdditionalPhone.isNotEmpty)
         'additional_phone': normalizedAdditionalPhone,
     };
@@ -1200,8 +1200,8 @@ class AppState extends ChangeNotifier {
             if (normalizedTown.isNotEmpty) 'town': normalizedTown,
             if (normalizedRegion.isNotEmpty && normalizedTown.isNotEmpty)
               'location': '$normalizedTown, $normalizedRegion',
-            if (services != null) 'services': services,
-            if (categories != null) 'categories': categories,
+            'services': services ?? const [],
+            'categories': categories ?? const [],
             if (normalizedAdditionalPhone.isNotEmpty)
               'additional_phone': normalizedAdditionalPhone,
           },

@@ -5,6 +5,7 @@ import '../app_state.dart';
 import '../theme.dart';
 import '../widgets/common.dart';
 import 'admin_tools.dart';
+import 'business_verification_admin.dart';
 
 class AdminDashboardPage extends StatefulWidget {
   const AdminDashboardPage({super.key});
@@ -155,6 +156,20 @@ class _AdminDashboardPageState extends State<AdminDashboardPage> {
                     subtitle: t('Search, suspend, or restore user accounts.'),
                     icon: Icons.manage_accounts_outlined,
                     onTap: () => openTools(context, 2),
+                  ),
+                  _ToolTile(
+                    title: t('Review business documents'),
+                    subtitle: t(
+                      'Review technician and supplier verification applications.',
+                    ),
+                    icon: Icons.verified_user_outlined,
+                    onTap: () => Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (_) =>
+                            const BusinessVerificationAdminPage(),
+                      ),
+                    ),
                   ),
                   const SizedBox(height: 24),
                   Card(

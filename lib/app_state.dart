@@ -52,11 +52,23 @@ class AppState extends ChangeNotifier {
   bool subscriptionLoading = false;
   bool subscriptionLoadFailed = false;
   Map<String, dynamic>? _pendingSignup;
+  bool businessVerificationLoading = false;
+  bool businessVerificationLoadFailed = false;
+  String businessVerificationStatus = 'not_started';
+  String businessVerificationRole = '';
+  String? businessVerificationReviewNote;
+  String? businessTaxIdentificationNumber;
+  List<String> verificationRequiredServices = [];
+  Map<String, String> businessVerificationDocuments = {};
 
   bool get hasActiveBusinessSubscription =>
       (userRole == 'Technician' || userRole == 'Supplier') &&
       subscriptionExpiresAt != null &&
       subscriptionExpiresAt!.isAfter(DateTime.now());
+  bool get hasApprovedBusinessDocuments =>
+      businessVerificationStatus == 'approved';
+  bool get isBusinessVerified =>
+      hasActiveBusinessSubscription && hasApprovedBusinessDocuments;
   Uint8List? profileImageBytes;
   String? profileImageUrl;
 
@@ -87,8 +99,12 @@ class AppState extends ChangeNotifier {
 
       final activeRows = await supabase
           .from('active_business_profiles')
-          .select('provider_id')
+          .select('provider_id,verified')
           .eq('role', 'Technician');
+      final verifiedById = {
+        for (final row in activeRows)
+          row['provider_id'] as String: row['verified'] == true,
+      };
       final activeTechnicianIds = activeRows
           .map((row) => row['provider_id'] as String)
           .toSet();
@@ -106,7 +122,7 @@ class AppState extends ChangeNotifier {
             town: (row['town'] as String?) ?? '',
             rating: (row['rating'] as num?)?.toDouble() ?? 0,
             jobs: (row['jobs'] as num?)?.toInt() ?? 0,
-            certified: (row['certified'] as bool?) ?? false,
+            certified: false,
             imagePath: '',
             imageUrl: row['image_url'] as String?,
           ),
@@ -140,20 +156,26 @@ class AppState extends ChangeNotifier {
             rating: ratingById[tech.id]?.toDouble() ?? 0,
             ratingCount: countById[tech.id] ?? 0,
             jobs: tech.jobs,
-            certified: tech.certified,
+            certified: verifiedById[tech.id] ?? false,
             imagePath: tech.imagePath,
             imageUrl: tech.imageUrl,
           ),
       ];
       showingDemoTechnicians = loaded.isEmpty && !kReleaseMode;
       technicianList = loaded.isEmpty
-          ? (kReleaseMode ? [] : List<TechnicianData>.from(technicians))
+          ? (kReleaseMode
+                ? []
+                : technicians
+                      .map((technician) => technician.copyWith(certified: false))
+                      .toList())
           : liveTechnicians;
     } catch (e) {
       debugPrint('Load technicians error: $e');
       if (technicianList.isEmpty && !kReleaseMode) {
         showingDemoTechnicians = true;
-        technicianList = List<TechnicianData>.from(technicians);
+        technicianList = technicians
+            .map((technician) => technician.copyWith(certified: false))
+            .toList();
       }
     }
     techniciansLoading = false;
@@ -268,8 +290,12 @@ class AppState extends ChangeNotifier {
 
       final activeSupplierRows = await supabase
           .from('active_business_profiles')
-          .select('provider_id')
+          .select('provider_id,verified')
           .eq('role', 'Supplier');
+      final verifiedSupplierIds = activeSupplierRows
+          .where((row) => row['verified'] == true)
+          .map((row) => row['provider_id'] as String)
+          .toSet();
       final activeSupplierIds = activeSupplierRows
           .map((row) => row['provider_id'] as String)
           .toSet();
@@ -305,12 +331,17 @@ class AppState extends ChangeNotifier {
       }
 
       final loaded = <Product>[];
-      for (final row in rows.where(
+      for (final sourceRow in rows.where(
         (row) =>
             (activeSupplierIds.contains(row['supplier_id']) &&
                 listedProductIds.contains(row['id'])) ||
             (userRole == 'Supplier' && row['supplier_id'] == currentUserId),
       )) {
+        final row = {
+          ...sourceRow,
+          'supplier_certified':
+              verifiedSupplierIds.contains(sourceRow['supplier_id']),
+        };
         final category = (row['category'] as String?) ?? '';
         loaded.add(
           Product(
@@ -713,6 +744,31 @@ class AppState extends ChangeNotifier {
   Future<List<Map<String, dynamic>>> adminLoadAccounts() async =>
       (await supabase.rpc('admin_list_accounts')).cast<Map<String, dynamic>>();
 
+  Future<List<Map<String, dynamic>>> adminLoadBusinessVerifications() async =>
+      (await supabase.rpc('admin_list_business_verifications'))
+          .cast<Map<String, dynamic>>();
+
+  Future<String> adminCreateVerificationDocumentUrl(String path) async =>
+      (await supabase.storage
+              .from('business-verification')
+              .createSignedUrl(path, 300))
+          .toString();
+
+  Future<void> adminReviewBusinessVerification(
+    String userId,
+    String decision, {
+    String? note,
+  }) async {
+    await supabase.rpc(
+      'admin_review_business_verification',
+      params: {
+        'p_user_id': userId,
+        'p_decision': decision,
+        'p_note': note,
+      },
+    );
+  }
+
   Future<void> adminSetProductListing(String productId, bool isListed) async {
     await supabase.rpc(
       'admin_set_product_listing',
@@ -975,9 +1031,136 @@ class AppState extends ChangeNotifier {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString('userRole', userRole);
     await prefs.setString('loginIdentifier', loginIdentifier);
+    await loadBusinessVerification();
     await loadBusinessSubscription();
     await loadProfileRating();
     startNotificationStream();
+  }
+
+  Future<void> loadBusinessVerification() async {
+    final userId = supabase.auth.currentUser?.id;
+    if (userId == null ||
+        (userRole != 'Technician' && userRole != 'Supplier')) {
+      businessVerificationStatus = 'not_started';
+      businessVerificationRole = '';
+      businessVerificationReviewNote = null;
+      businessTaxIdentificationNumber = null;
+      verificationRequiredServices = [];
+      businessVerificationDocuments = {};
+      businessVerificationLoadFailed = false;
+      businessVerificationLoading = false;
+      notifyListeners();
+      return;
+    }
+
+    businessVerificationLoading = true;
+    businessVerificationLoadFailed = false;
+    notifyListeners();
+    try {
+      await supabase.rpc('initialize_business_verification');
+      final row = await supabase
+          .from('business_verifications')
+          .select()
+          .eq('user_id', userId)
+          .maybeSingle();
+      if (row == null) {
+        throw StateError('Business verification record was not created.');
+      }
+      final documents = await supabase
+          .from('business_verification_documents')
+          .select('document_key,storage_path')
+          .eq('user_id', userId);
+      businessVerificationStatus = row['status'] as String? ?? 'not_started';
+      businessVerificationRole = row['role'] as String? ?? userRole;
+      businessVerificationReviewNote = row['review_note'] as String?;
+      businessTaxIdentificationNumber =
+          row['tax_identification_number'] as String?;
+      verificationRequiredServices =
+          (row['required_services'] as List<dynamic>? ?? const [])
+              .whereType<String>()
+              .toList();
+      businessVerificationDocuments = {
+        for (final document in documents)
+          document['document_key'] as String:
+              document['storage_path'] as String,
+      };
+    } catch (e) {
+      debugPrint('Load business verification error: $e');
+      businessVerificationLoadFailed = true;
+    } finally {
+      businessVerificationLoading = false;
+      notifyListeners();
+    }
+  }
+
+  Future<bool> submitBusinessVerification(
+    List<VerificationDocumentFile> files, {
+    String? taxIdentificationNumber,
+  }) async {
+    authError = '';
+    final userId = supabase.auth.currentUser?.id;
+    if (userId == null) {
+      authError = 'Sign in to submit verification documents.';
+      return false;
+    }
+    try {
+      for (final file in files) {
+        final extension = file.fileName.split('.').last.toLowerCase();
+        final contentType = switch (extension) {
+          'pdf' => 'application/pdf',
+          'jpg' || 'jpeg' => 'image/jpeg',
+          'png' => 'image/png',
+          'webp' => 'image/webp',
+          _ => throw StateError(
+            'Only PDF, JPEG, PNG, and WebP files are supported.',
+          ),
+        };
+        if (file.bytes.length > 15 * 1024 * 1024) {
+          throw StateError('Each verification file must be 15 MB or smaller.');
+        }
+        final safeKey = file.documentKey.replaceAll(
+          RegExp(r'[^a-zA-Z0-9_-]'),
+          '_',
+        );
+        final path = '$userId/$safeKey.$extension';
+        await supabase.storage
+            .from('business-verification')
+            .uploadBinary(
+              path,
+              file.bytes,
+              fileOptions: FileOptions(contentType: contentType, upsert: true),
+            );
+        final previousPath = businessVerificationDocuments[file.documentKey];
+        await supabase.from('business_verification_documents').upsert({
+          'user_id': userId,
+          'document_key': file.documentKey,
+          'document_type': file.documentType,
+          'service_name': file.serviceName,
+          'storage_path': path,
+        }, onConflict: 'user_id,document_key');
+        if (previousPath != null && previousPath != path) {
+          try {
+            await supabase.storage
+                .from('business-verification')
+                .remove([previousPath]);
+          } catch (e) {
+            debugPrint('Old verification file cleanup failed: $e');
+          }
+        }
+      }
+      await supabase.rpc(
+        'submit_business_verification',
+        params: {
+          'p_tax_identification_number': taxIdentificationNumber,
+        },
+      );
+      await loadBusinessVerification();
+      return true;
+    } catch (e) {
+      debugPrint('Submit business verification error: $e');
+      authError = e.toString().replaceFirst('Bad state: ', '');
+      return false;
+    }
   }
 
   Future<void> loadBusinessSubscription() async {
@@ -1392,6 +1575,14 @@ class AppState extends ChangeNotifier {
     profileImageBytes = null;
     profileImageUrl = null;
     subscriptionExpiresAt = null;
+    businessVerificationStatus = 'not_started';
+    businessVerificationRole = '';
+    businessVerificationReviewNote = null;
+    businessTaxIdentificationNumber = null;
+    verificationRequiredServices = [];
+    businessVerificationDocuments = {};
+    businessVerificationLoadFailed = false;
+    businessVerificationLoading = false;
     profileRating = 0;
     profileRatingCount = 0;
     activities.clear();
@@ -2171,6 +2362,22 @@ class AppState extends ChangeNotifier {
   }
 }
 
+class VerificationDocumentFile {
+  final String documentKey;
+  final String documentType;
+  final String? serviceName;
+  final String fileName;
+  final Uint8List bytes;
+
+  const VerificationDocumentFile({
+    required this.documentKey,
+    required this.documentType,
+    this.serviceName,
+    required this.fileName,
+    required this.bytes,
+  });
+}
+
 class CartItem {
   final String? productId;
   final String name;
@@ -2214,7 +2421,7 @@ class Product {
     required this.name,
     required this.price,
     this.supplierName = 'FixMate Supplies',
-    this.supplierCertified = true,
+    this.supplierCertified = false,
     this.category = '',
     this.description = '',
     this.inStock = true,
@@ -2572,6 +2779,20 @@ class TechnicianData {
     required this.imagePath,
     this.imageUrl,
   });
+
+  TechnicianData copyWith({bool? certified}) => TechnicianData(
+    id: id,
+    name: name,
+    services: services,
+    region: region,
+    town: town,
+    rating: rating,
+    ratingCount: ratingCount,
+    jobs: jobs,
+    certified: certified ?? this.certified,
+    imagePath: imagePath,
+    imageUrl: imageUrl,
+  );
 
   ImageProvider? get image {
     final url = imageUrl;

@@ -19,6 +19,28 @@ void main() {
     expect(state.hasActiveBusinessSubscription, isFalse);
   });
 
+  test('blue verification requires approved documents and an active plan', () {
+    final state = AppState()
+      ..userRole = 'Technician'
+      ..subscriptionExpiresAt = DateTime.now().add(const Duration(days: 1))
+      ..businessVerificationStatus = 'submitted';
+    expect(state.isBusinessVerified, isFalse);
+
+    state.businessVerificationStatus = 'approved';
+    expect(state.isBusinessVerified, isTrue);
+
+    state.subscriptionExpiresAt = DateTime.now().subtract(
+      const Duration(seconds: 1),
+    );
+    expect(state.isBusinessVerified, isFalse);
+
+    state
+      ..userRole = 'Supplier'
+      ..subscriptionExpiresAt = DateTime.now().add(const Duration(days: 1))
+      ..businessVerificationStatus = 'approved';
+    expect(state.isBusinessVerified, isTrue);
+  });
+
   test('hidden listings stay out of the customer catalog', () {
     final listed = Product(
       id: 'listed',

@@ -10,6 +10,8 @@ import 'home.dart';
 import 'technicians.dart';
 import 'shop.dart';
 import 'profile.dart';
+import 'business_verification.dart';
+import 'login.dart';
 
 class MainNavigation extends StatefulWidget {
   const MainNavigation({super.key});
@@ -38,6 +40,54 @@ class _MainNavigationState extends State<MainNavigation> {
   @override
   Widget build(BuildContext context) {
     final state = context.watch<AppState>();
+    final isAuthenticatedSupplier =
+        state.userRole == 'Supplier' && supabase.auth.currentUser != null;
+    if (isAuthenticatedSupplier &&
+        state.businessVerificationLoading) {
+      return const Scaffold(
+        body: Center(child: CircularProgressIndicator()),
+      );
+    }
+    if (isAuthenticatedSupplier && state.businessVerificationLoadFailed) {
+      return Scaffold(
+        body: Center(
+          child: Padding(
+            padding: const EdgeInsets.all(24),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Text(
+                  'We could not check your company approval. Access stays limited until verification status can be confirmed.',
+                  textAlign: TextAlign.center,
+                ),
+                const SizedBox(height: 12),
+                FilledButton(
+                  onPressed: state.loadBusinessVerification,
+                  child: const Text('Retry'),
+                ),
+                TextButton(
+                  onPressed: () async {
+                    await state.signOutSupabase();
+                    if (context.mounted) {
+                      Navigator.of(context).pushAndRemoveUntil(
+                        MaterialPageRoute(builder: (_) => const LoginPage()),
+                        (_) => false,
+                      );
+                    }
+                  },
+                  child: const Text('Sign out'),
+                ),
+              ],
+            ),
+          ),
+        ),
+      );
+    }
+    if (isAuthenticatedSupplier &&
+        !state.hasApprovedBusinessDocuments) {
+      return const BusinessVerificationPage();
+    }
+
     final isBusinessRole =
         state.userRole == 'Technician' || state.userRole == 'Supplier';
     final isAdmin = state.userRole == 'Admin';
@@ -49,7 +99,58 @@ class _MainNavigationState extends State<MainNavigation> {
         : [HomePage(), TechniciansPage(), ShopPage(), ProfilePage()];
 
     return Scaffold(
-      body: IndexedStack(index: currentIndex, children: pages),
+      body: Column(
+        children: [
+          if (state.userRole == 'Technician' && !state.isBusinessVerified)
+            Material(
+              color: Theme.of(context).colorScheme.errorContainer,
+              child: SafeArea(
+                bottom: false,
+                child: InkWell(
+                  onTap: () async {
+                    await Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (_) => const BusinessVerificationPage(
+                          allowSkip: true,
+                        ),
+                      ),
+                    );
+                    if (context.mounted) {
+                      context.read<AppState>().loadBusinessVerification();
+                      context.read<AppState>().loadBusinessSubscription();
+                    }
+                  },
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 16,
+                      vertical: 10,
+                    ),
+                    child: Row(
+                      children: [
+                        const Icon(Icons.info_outline),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: Text(
+                            state.hasApprovedBusinessDocuments
+                                ? 'Subscribe to display your blue verified badge.'
+                                : state.businessVerificationStatus == 'submitted'
+                                ? 'Documents are under review. Your verified badge appears after approval and subscription.'
+                                : 'Submit your verification documents to qualify for the blue verified badge.',
+                          ),
+                        ),
+                        const Icon(Icons.chevron_right),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          Expanded(
+            child: IndexedStack(index: currentIndex, children: pages),
+          ),
+        ],
+      ),
       bottomNavigationBar: FixMateBottomNavigation(
         currentIndex: currentIndex,
         isBusinessRole: isBusinessRole,

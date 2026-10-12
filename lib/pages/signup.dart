@@ -7,6 +7,7 @@ import '../app_state.dart';
 import '../theme.dart';
 import '../widgets/signup_helpers.dart';
 import 'navigation.dart';
+import 'business_verification.dart';
 
 class CustomerSignupPage extends StatefulWidget {
   const CustomerSignupPage({super.key});
@@ -586,7 +587,7 @@ class _SupplierSignupPageState extends State<SupplierSignupPage> {
 
         Text(
           t(
-            'Business verification documents can be submitted after registration.',
+            'Company documents are required immediately after account verification. Admin review may take up to 24 hours.',
           ),
           textAlign: TextAlign.center,
           style: Theme.of(context).textTheme.bodySmall,
@@ -634,9 +635,12 @@ class _SignupVerificationPageState extends State<SignupVerificationPage> {
     if (!mounted) return;
     setState(() => verifying = false);
     if (success) {
+      final nextPage = state.userRole == 'Technician'
+          ? const BusinessVerificationPage(allowSkip: true)
+          : const MainNavigation();
       Navigator.pushAndRemoveUntil(
         context,
-        MaterialPageRoute(builder: (_) => const MainNavigation()),
+        MaterialPageRoute(builder: (_) => nextPage),
         (route) => false,
       );
     } else {
@@ -679,7 +683,9 @@ class _SignupVerificationPageState extends State<SignupVerificationPage> {
         ),
         const SizedBox(height: 8),
         Text(
-          t('If you do not receive it, check the address or number and try again.'),
+          t(
+            'If you do not receive it, check the address or number and try again.',
+          ),
           textAlign: TextAlign.center,
           style: Theme.of(context).textTheme.bodySmall,
         ),

@@ -50,6 +50,8 @@ Required settings:
 | `FAPSHI_BASE_URL` | `https://sandbox.fapshi.com` or `https://live.fapshi.com` |
 | `CORS_ALLOWED_ORIGIN` | Optional allowed Flutter web origin |
 | `FAPSHI_WEBHOOK_SECRET` | Optional shared secret; omit it if Fapshi does not provide webhook secrets |
+| `VERIFICATION_RETENTION_JOB_TOKEN` | Long, random server-only token for the scheduled 90-day document cleanup job |
+| `FIXMATE_ALERT_WEBHOOK_URL` | Optional alert webhook for generic API readiness and processing failures |
 
 Set `FAPSHI_BASE_URL` and credentials to the same environment. Fapshi may also require the API server's IP address to be allowlisted. Live direct-pay is not used; the app opens Fapshi's hosted checkout.
 
@@ -59,6 +61,27 @@ Set `FAPSHI_BASE_URL` and credentials to the same environment. Fapshi may also r
 2. Deploy the API over HTTPS and set its environment variables. Configure the Flutter `FIXMATE_API_URL` to that deployment.
 3. If Fapshi supports webhook setup for your service, configure `https://api.example.com/api/fapshi/webhook` and set `FAPSHI_WEBHOOK_SECRET` to the same secret. Both settings are optional; without them, the app checks transaction status directly with Fapshi after the user taps “Check payment status”.
 4. Test in sandbox, including successful and failed payments, before switching both the Fapshi base URL and credentials to live.
+
+## Verification operations
+
+The verification history migration is already applied in the existing project. Apply only the newer `20261012070000_verification_operations_hardening.sql` migration; do not edit or replay the applied `20261012063000_verification_notifications_history.sql`. The new migration creates admin-only audit history for review actions and sensitive document access, and schedules subscription expiry reminders for 08:00 UTC daily using Supabase `pg_cron`. Ensure the `pg_cron` extension is available to the database role applying the migration.
+
+Private verification files and their metadata are removed 90 days after final approval or rejection. The GitHub Actions workflow `.github/workflows/verification-document-retention.yml` calls `POST /internal/jobs/prune-verification-documents` daily at 08:17 UTC. Before it can run successfully, deploy the API over HTTPS and add these repository Actions secrets under **Settings → Secrets and variables → Actions**:
+
+| Secret | Value |
+| --- | --- |
+| `FIXMATE_API_BASE_URL` | The deployed API origin, for example `https://api.example.com` |
+| `VERIFICATION_RETENTION_JOB_TOKEN` | The same long, random secret configured on the API host |
+
+The API processes up to 500 documents per run; remaining eligible files are picked up by subsequent daily runs. Do not expose the job token to the Flutter app. Failed jobs return HTTP 503 and can send a generic alert when `FIXMATE_ALERT_WEBHOOK_URL` is configured.
+
+For read-only staging checks, set `FIXMATE_STAGING_SUPABASE_URL`, `FIXMATE_STAGING_ANON_KEY`, and dedicated staging-only access tokens for a technician, supplier, and admin, then run:
+
+```sh
+node --test scripts/staging-smoke.test.js
+```
+
+The test checks verification RLS, provider listing/verified eligibility, and admin-only review/audit RPCs. It never changes records or creates a payment. To additionally check the status of an existing dedicated sandbox subscription transaction, also set `FIXMATE_STAGING_API_URL` and `FIXMATE_STAGING_SUBSCRIPTION_TRANSACTION_ID`; otherwise that optional test is skipped. Do not use production accounts or credentials.
 
 Subscription plans display USD prices: technicians pay USD 9 monthly or USD 90 yearly; suppliers pay USD 34 monthly or USD 340 yearly. At checkout, the API fetches the latest available USD/XAF rate from ExchangeRate-API, converts the fixed USD price to the nearest whole XAF amount required by Fapshi, and stores both the quoted rate and resulting amount with the pending subscription. This quote is fixed for that payment attempt; starting a new attempt fetches a fresh rate. The app shows prices in USD, while Fapshi requests the converted XAF amount.
 

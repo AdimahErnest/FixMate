@@ -1,0 +1,43 @@
+name: Verification document retention
+
+on:
+  schedule:
+    - cron: '17 8 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: verification-document-retention
+  cancel-in-progress: false
+
+jobs:
+  prune:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Prune documents past retention
+        shell: bash
+        env:
+          API_BASE_URL: ${{ secrets.FIXMATE_API_BASE_URL }}
+          JOB_TOKEN: ${{ secrets.VERIFICATION_RETENTION_JOB_TOKEN }}
+        run: |
+          set -euo pipefail
+
+          if [[ -z "$API_BASE_URL" || -z "$JOB_TOKEN" ]]; then
+            echo "::error::Set FIXMATE_API_BASE_URL and VERIFICATION_RETENTION_JOB_TOKEN repository secrets."
+            exit 1
+          fi
+
+          api_base_url="${API_BASE_URL%/}"
+          if [[ "$api_base_url" != https://* ]]; then
+            echo "::error::FIXMATE_API_BASE_URL must use HTTPS."
+            exit 1
+          fi
+
+          curl --fail --silent --show-error \
+            --connect-timeout 10 \
+            --max-time 60 \
+            --request POST \
+            --header "x-fixmate-job-token: $JOB_TOKEN" \
+            "$api_base_url/internal/jobs/prune-verification-documents"

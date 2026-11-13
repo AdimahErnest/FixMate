@@ -160,10 +160,29 @@ class _SubscriptionPageState extends State<SubscriptionPage> {
                 'Subscription active until ${state.subscriptionExpiresAt!.toLocal().toString().split(' ').first}.',
                 style: const TextStyle(color: Colors.green),
               )
+            else if (state.subscriptionExpiresAt != null)
+              Text(
+                'Your subscription expired on ${state.subscriptionExpiresAt!.toLocal().toString().split(' ').first}. Renew to restore access and listing eligibility.',
+                style: TextStyle(color: Theme.of(context).colorScheme.error),
+              )
             else
               const Text(
                 'An active subscription is required to publish products or manage service work.',
               ),
+            if (state.subscriptionReminderLoadFailed) ...[
+              const SizedBox(height: 8),
+              Row(
+                children: [
+                  const Expanded(
+                    child: Text('Could not create subscription reminders.'),
+                  ),
+                  TextButton(
+                    onPressed: state.loadBusinessSubscription,
+                    child: const Text('Retry'),
+                  ),
+                ],
+              ),
+            ],
             const SizedBox(height: 24),
             _buildPlanCard(
               title: 'Monthly Plan',

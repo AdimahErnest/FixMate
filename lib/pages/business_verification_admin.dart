@@ -14,9 +14,28 @@ class BusinessVerificationAdminPage extends StatefulWidget {
 class _BusinessVerificationAdminPageState
     extends State<BusinessVerificationAdminPage> {
   List<Map<String, dynamic>> applications = [];
+  List<Map<String, dynamic>> auditEvents = [];
   bool loading = true;
   String? error;
   final Set<String> busy = {};
+
+  String documentLabel(Map<String, dynamic> document) {
+    final type = document['document_type'] as String? ?? 'Document';
+    final serviceName = document['service_name'] as String?;
+    if (type == 'technician_license' && serviceName != null) {
+      return 'Certificate or license — $serviceName';
+    }
+    return switch (type) {
+      'criminal_record' => 'Criminal record document',
+      'government_id_front' => 'Government ID card (front)',
+      'government_id_back' => 'Government ID card (back)',
+      'government_id_holding' => 'Photo holding government ID',
+      'location_plan' => 'Location plan',
+      'registration_certificate' => 'Certificate of registration',
+      'tax_identification' => 'Tax identification document',
+      _ => type.replaceAll('_', ' '),
+    };
+  }
 
   @override
   void initState() {
@@ -30,12 +49,13 @@ class _BusinessVerificationAdminPageState
       error = null;
     });
     try {
-      final result = await context
-          .read<AppState>()
-          .adminLoadBusinessVerifications();
+      final appState = context.read<AppState>();
+      final result = await appState.adminLoadBusinessVerifications();
+      final audit = await appState.adminLoadBusinessVerificationAudit();
       if (!mounted) return;
       setState(() {
         applications = result;
+        auditEvents = audit;
         loading = false;
       });
     } catch (e) {
@@ -76,6 +96,8 @@ class _BusinessVerificationAdminPageState
           maxLength: 500,
           decoration: const InputDecoration(
             labelText: 'Explain what needs correction',
+            helperText:
+                'Name each document and describe the correction needed.',
           ),
         ),
         actions: [
@@ -153,7 +175,13 @@ class _BusinessVerificationAdminPageState
               ),
             )
           : applications.isEmpty
-          ? const Center(child: Text('No business documents need review.'))
+          ? ListView(
+              padding: const EdgeInsets.all(16),
+              children: [
+                const Center(child: Text('No business documents need review.')),
+                _auditLog(),
+              ],
+            )
           : ListView(
               padding: const EdgeInsets.all(16),
               children: [
@@ -167,14 +195,51 @@ class _BusinessVerificationAdminPageState
                 ),
                 for (final application in applications)
                   _applicationCard(application),
+                _auditLog(),
               ],
             ),
     );
   }
 
+  Widget _auditLog() => Card(
+    margin: const EdgeInsets.symmetric(vertical: 12),
+    child: Padding(
+      padding: const EdgeInsets.all(14),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            'Recent verification audit',
+            style: Theme.of(context).textTheme.titleLarge,
+          ),
+          if (auditEvents.isEmpty)
+            const Padding(
+              padding: EdgeInsets.only(top: 8),
+              child: Text('No verification audit events yet.'),
+            )
+          else
+            for (final event in auditEvents)
+              ListTile(
+                contentPadding: EdgeInsets.zero,
+                dense: true,
+                title: Text(
+                  '${event['event_type']}${event['document_key'] is String ? ' · ${event['document_key']}' : ''}',
+                ),
+                subtitle: Text(
+                  '${event['target_name'] ?? 'Business account'}'
+                  ' · ${event['actor_name'] ?? 'System'}'
+                  ' · ${event['created_at'] ?? ''}',
+                ),
+              ),
+        ],
+      ),
+    ),
+  );
+
   Widget _applicationCard(Map<String, dynamic> application) {
     final userId = application['user_id'] as String;
     final isBusy = busy.contains(userId);
+    final isSubmitted = application['status'] == 'submitted';
     final documents = (application['documents'] as List<dynamic>? ?? const [])
         .whereType<Map<String, dynamic>>()
         .toList();
@@ -193,7 +258,10 @@ class _BusinessVerificationAdminPageState
             Text(
               '${application['role'] ?? ''} · ${application['email'] ?? ''}',
             ),
-            Text('Status: ${application['status'] ?? 'submitted'}'),
+            Text(
+              'Status: ${application['status'] ?? 'submitted'}'
+              '${application['submitted_at'] is String ? ' · Submitted ${application['submitted_at']}' : ''}',
+            ),
             if (application['tax_identification_number'] is String) ...[
               const SizedBox(height: 4),
               Text(
@@ -205,15 +273,15 @@ class _BusinessVerificationAdminPageState
               Text('Previous note: ${application['review_note']}'),
             ],
             const SizedBox(height: 10),
+            if (!isSubmitted)
+              const Text(
+                'Waiting for the provider to resubmit corrected documents. Review actions are disabled until then.',
+              ),
             for (final document in documents)
               ListTile(
                 contentPadding: EdgeInsets.zero,
                 leading: const Icon(Icons.description_outlined),
-                title: Text(
-                  document['service_name'] is String
-                      ? '${document['document_type']} — ${document['service_name']}'
-                      : (document['document_type'] as String? ?? 'Document'),
-                ),
+                title: Text(documentLabel(document)),
                 trailing: IconButton(
                   tooltip: 'Open secure document',
                   onPressed: () =>
@@ -227,7 +295,7 @@ class _BusinessVerificationAdminPageState
               spacing: 8,
               children: [
                 OutlinedButton(
-                  onPressed: isBusy
+                  onPressed: isBusy || !isSubmitted
                       ? null
                       : () async {
                           final note = await askForRejectionNote();
@@ -237,7 +305,9 @@ class _BusinessVerificationAdminPageState
                   child: const Text('Request changes'),
                 ),
                 FilledButton(
-                  onPressed: isBusy ? null : () => review(userId, 'approved'),
+                  onPressed: isBusy || !isSubmitted
+                      ? null
+                      : () => review(userId, 'approved'),
                   child: isBusy
                       ? const SizedBox(
                           width: 18,

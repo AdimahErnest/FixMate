@@ -116,9 +116,7 @@ class _ForgotPasswordPageState extends State<ForgotPasswordPage> {
       return;
     }
     if (!isStrongSignupPassword(newPassword)) {
-      showMessage(
-        t('Use at least 8 characters with uppercase, lowercase, and a number.'),
-      );
+      showMessage(t('Use at least 8 characters.'));
       return;
     }
     if (newPassword != confirmController.text) {
@@ -223,7 +221,7 @@ class _ForgotPasswordPageState extends State<ForgotPasswordPage> {
                 decoration: InputDecoration(
                   labelText: t('New password'),
                   prefixIcon: const Icon(Icons.lock_outline),
-                  helperText: t('Use at least 8 characters with uppercase, lowercase, and a number.'),
+                  helperText: t('Use at least 8 characters.'),
                   suffixIcon: IconButton(
                     tooltip: t(showPassword ? 'Hide password' : 'Show password'),
                     onPressed: () =>

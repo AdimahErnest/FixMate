@@ -20,19 +20,32 @@ class MainNavigation extends StatefulWidget {
   State<MainNavigation> createState() => _MainNavigationState();
 }
 
-class _MainNavigationState extends State<MainNavigation> {
+class _MainNavigationState extends State<MainNavigation>
+    with WidgetsBindingObserver {
   int currentIndex = 0;
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) context.read<AppState>().startNotificationStream();
     });
   }
 
   @override
+  void didChangeAppLifecycleState(AppLifecycleState lifecycleState) {
+    if (lifecycleState != AppLifecycleState.resumed || !mounted) return;
+    final state = context.read<AppState>();
+    if (state.userRole == 'Technician' || state.userRole == 'Supplier') {
+      state.loadBusinessSubscription();
+      state.loadBusinessVerification();
+    }
+  }
+
+  @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     context.read<AppState>().stopNotificationStream();
     super.dispose();
   }
@@ -101,21 +114,26 @@ class _MainNavigationState extends State<MainNavigation> {
     return Scaffold(
       body: Column(
         children: [
-          if (state.userRole == 'Technician' && !state.isBusinessVerified)
+          if (isBusinessRole && !state.isBusinessVerified)
             Material(
               color: Theme.of(context).colorScheme.errorContainer,
               child: SafeArea(
                 bottom: false,
                 child: InkWell(
                   onTap: () async {
-                    await Navigator.push(
-                      context,
-                      MaterialPageRoute(
-                        builder: (_) => const BusinessVerificationPage(
-                          allowSkip: true,
+                    if (state.hasApprovedBusinessDocuments &&
+                        !state.hasActiveBusinessSubscription) {
+                      setState(() => currentIndex = 2);
+                    } else {
+                      await Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (_) => const BusinessVerificationPage(
+                            allowSkip: true,
+                          ),
                         ),
-                      ),
-                    );
+                      );
+                    }
                     if (context.mounted) {
                       context.read<AppState>().loadBusinessVerification();
                       context.read<AppState>().loadBusinessSubscription();
@@ -136,7 +154,13 @@ class _MainNavigationState extends State<MainNavigation> {
                                 ? 'Subscribe to display your blue verified badge.'
                                 : state.businessVerificationStatus == 'submitted'
                                 ? 'Documents are under review. Your verified badge appears after approval and subscription.'
-                                : 'Submit your verification documents to qualify for the blue verified badge.',
+                                : state.businessVerificationStatus == 'rejected'
+                                ? 'Changes were requested for your verification documents. Tap to review the admin note and resubmit.'
+                                : state.hasActiveBusinessSubscription
+                                ? 'Your subscription is active. Submit documents to display your blue verified badge.'
+                                : state.userRole == 'Technician'
+                                ? 'Your profile can be listed for 7 days after signup. Subscribe to stay listed; submit documents to qualify for the blue verified badge.'
+                                : 'Submit verification documents and subscribe to display your blue verified badge.',
                           ),
                         ),
                         const Icon(Icons.chevron_right),

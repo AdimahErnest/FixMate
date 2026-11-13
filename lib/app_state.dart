@@ -6,6 +6,7 @@ import 'package:image_picker/image_picker.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'services/phone_auth_service.dart';
+import 'widgets/signup_helpers.dart';
 
 final supabase = Supabase.instance.client;
 
@@ -16,6 +17,52 @@ String productImageMimeType(XFile image) {
     'png' => 'image/png',
     'webp' => 'image/webp',
     _ => throw Exception('Use JPEG, PNG, or WebP product photos.'),
+  };
+}
+
+String verificationDocumentMimeType({
+  required String fileName,
+  required Uint8List bytes,
+}) {
+  final extension = fileName.split('.').last.toLowerCase();
+  final hasSignature = switch (extension) {
+    'pdf' =>
+      bytes.length >= 5 &&
+          String.fromCharCodes(bytes.take(5)) == '%PDF-',
+    'jpg' || 'jpeg' =>
+      bytes.length >= 3 &&
+          bytes[0] == 0xff &&
+          bytes[1] == 0xd8 &&
+          bytes[2] == 0xff,
+    'png' =>
+      bytes.length >= 8 &&
+          bytes[0] == 0x89 &&
+          bytes[1] == 0x50 &&
+          bytes[2] == 0x4e &&
+          bytes[3] == 0x47 &&
+          bytes[4] == 0x0d &&
+          bytes[5] == 0x0a &&
+          bytes[6] == 0x1a &&
+          bytes[7] == 0x0a,
+    'webp' =>
+      bytes.length >= 12 &&
+          String.fromCharCodes(bytes.sublist(0, 4)) == 'RIFF' &&
+          String.fromCharCodes(bytes.sublist(8, 12)) == 'WEBP',
+    _ => false,
+  };
+  if (!hasSignature) {
+    throw const FormatException(
+      'Choose a valid PDF, JPEG, PNG, or WebP verification document.',
+    );
+  }
+  return switch (extension) {
+    'pdf' => 'application/pdf',
+    'jpg' || 'jpeg' => 'image/jpeg',
+    'png' => 'image/png',
+    'webp' => 'image/webp',
+    _ => throw const FormatException(
+      'Choose a valid PDF, JPEG, PNG, or WebP verification document.',
+    ),
   };
 }
 
@@ -51,6 +98,7 @@ class AppState extends ChangeNotifier {
   DateTime? subscriptionExpiresAt;
   bool subscriptionLoading = false;
   bool subscriptionLoadFailed = false;
+  bool subscriptionReminderLoadFailed = false;
   Map<String, dynamic>? _pendingSignup;
   bool businessVerificationLoading = false;
   bool businessVerificationLoadFailed = false;
@@ -60,6 +108,7 @@ class AppState extends ChangeNotifier {
   String? businessTaxIdentificationNumber;
   List<String> verificationRequiredServices = [];
   Map<String, String> businessVerificationDocuments = {};
+  List<BusinessVerificationHistoryEntry> businessVerificationHistory = [];
 
   bool get hasActiveBusinessSubscription =>
       (userRole == 'Technician' || userRole == 'Supplier') &&
@@ -748,11 +797,24 @@ class AppState extends ChangeNotifier {
       (await supabase.rpc('admin_list_business_verifications'))
           .cast<Map<String, dynamic>>();
 
+  Future<List<Map<String, dynamic>>>
+  adminLoadBusinessVerificationAudit() async =>
+      (await supabase.rpc('admin_list_business_verification_audit'))
+          .cast<Map<String, dynamic>>();
+
   Future<String> adminCreateVerificationDocumentUrl(String path) async =>
-      (await supabase.storage
-              .from('business-verification')
-              .createSignedUrl(path, 300))
+      (await _createAuditedVerificationDocumentUrl(path))
           .toString();
+
+  Future<String> _createAuditedVerificationDocumentUrl(String path) async {
+    await supabase.rpc(
+      'audit_business_verification_document_access',
+      params: {'p_storage_path': path},
+    );
+    return supabase.storage
+        .from('business-verification')
+        .createSignedUrl(path, 300);
+  }
 
   Future<void> adminReviewBusinessVerification(
     String userId,
@@ -986,7 +1048,7 @@ class AppState extends ChangeNotifier {
       }
       if (msg.contains('password') &&
           (msg.contains('at least') || msg.contains('weak'))) {
-        return 'Password is too weak. Use at least 8 characters with uppercase, lowercase, and a number.';
+        return 'Password must be at least 8 characters.';
       }
       if (msg.contains('rate limit') || msg.contains('too many')) {
         return 'Too many attempts. Please wait a moment and try again.';
@@ -1047,6 +1109,7 @@ class AppState extends ChangeNotifier {
       businessTaxIdentificationNumber = null;
       verificationRequiredServices = [];
       businessVerificationDocuments = {};
+      businessVerificationHistory = [];
       businessVerificationLoadFailed = false;
       businessVerificationLoading = false;
       notifyListeners();
@@ -1070,6 +1133,12 @@ class AppState extends ChangeNotifier {
           .from('business_verification_documents')
           .select('document_key,storage_path')
           .eq('user_id', userId);
+      final history = await supabase
+          .from('business_verification_history')
+          .select('id,event_type,note,actor_id,created_at')
+          .eq('user_id', userId)
+          .order('created_at', ascending: false)
+          .limit(20);
       businessVerificationStatus = row['status'] as String? ?? 'not_started';
       businessVerificationRole = row['role'] as String? ?? userRole;
       businessVerificationReviewNote = row['review_note'] as String?;
@@ -1084,6 +1153,9 @@ class AppState extends ChangeNotifier {
           document['document_key'] as String:
               document['storage_path'] as String,
       };
+      businessVerificationHistory = history
+          .map(BusinessVerificationHistoryEntry.fromRow)
+          .toList();
     } catch (e) {
       debugPrint('Load business verification error: $e');
       businessVerificationLoadFailed = true;
@@ -1096,6 +1168,8 @@ class AppState extends ChangeNotifier {
   Future<bool> submitBusinessVerification(
     List<VerificationDocumentFile> files, {
     String? taxIdentificationNumber,
+    void Function(String documentKey, VerificationUploadState state)?
+    onUploadStateChanged,
   }) async {
     authError = '';
     final userId = supabase.auth.currentUser?.id;
@@ -1106,15 +1180,10 @@ class AppState extends ChangeNotifier {
     try {
       for (final file in files) {
         final extension = file.fileName.split('.').last.toLowerCase();
-        final contentType = switch (extension) {
-          'pdf' => 'application/pdf',
-          'jpg' || 'jpeg' => 'image/jpeg',
-          'png' => 'image/png',
-          'webp' => 'image/webp',
-          _ => throw StateError(
-            'Only PDF, JPEG, PNG, and WebP files are supported.',
-          ),
-        };
+        final contentType = verificationDocumentMimeType(
+          fileName: file.fileName,
+          bytes: file.bytes,
+        );
         if (file.bytes.length > 15 * 1024 * 1024) {
           throw StateError('Each verification file must be 15 MB or smaller.');
         }
@@ -1123,29 +1192,51 @@ class AppState extends ChangeNotifier {
           '_',
         );
         final path = '$userId/$safeKey.$extension';
-        await supabase.storage
-            .from('business-verification')
-            .uploadBinary(
-              path,
-              file.bytes,
-              fileOptions: FileOptions(contentType: contentType, upsert: true),
-            );
-        final previousPath = businessVerificationDocuments[file.documentKey];
-        await supabase.from('business_verification_documents').upsert({
-          'user_id': userId,
-          'document_key': file.documentKey,
-          'document_type': file.documentType,
-          'service_name': file.serviceName,
-          'storage_path': path,
-        }, onConflict: 'user_id,document_key');
-        if (previousPath != null && previousPath != path) {
-          try {
-            await supabase.storage
-                .from('business-verification')
-                .remove([previousPath]);
-          } catch (e) {
-            debugPrint('Old verification file cleanup failed: $e');
+        onUploadStateChanged?.call(
+          file.documentKey,
+          VerificationUploadState.uploading,
+        );
+        try {
+          await supabase.storage
+              .from('business-verification')
+              .uploadBinary(
+                path,
+                file.bytes,
+                fileOptions: FileOptions(
+                  contentType: contentType,
+                  upsert: true,
+                ),
+              );
+          final previousPath =
+              businessVerificationDocuments[file.documentKey];
+          await supabase.from('business_verification_documents').upsert({
+            'user_id': userId,
+            'document_key': file.documentKey,
+            'document_type': file.documentType,
+            'service_name': file.serviceName,
+            'storage_path': path,
+          }, onConflict: 'user_id,document_key');
+          businessVerificationDocuments[file.documentKey] = path;
+          notifyListeners();
+          onUploadStateChanged?.call(
+            file.documentKey,
+            VerificationUploadState.uploaded,
+          );
+          if (previousPath != null && previousPath != path) {
+            try {
+              await supabase.storage
+                  .from('business-verification')
+                  .remove([previousPath]);
+            } catch (e) {
+              debugPrint('Old verification file cleanup failed: $e');
+            }
           }
+        } catch (_) {
+          onUploadStateChanged?.call(
+            file.documentKey,
+            VerificationUploadState.failed,
+          );
+          rethrow;
         }
       }
       await supabase.rpc(
@@ -1181,19 +1272,26 @@ class AppState extends ChangeNotifier {
     }
     subscriptionLoading = true;
     subscriptionLoadFailed = false;
+    subscriptionReminderLoadFailed = false;
     notifyListeners();
     try {
       final rows = await supabase
           .from('subscriptions')
           .select('expires_at')
           .eq('user_id', userId)
+          .eq('role', userRole)
           .eq('status', 'active')
-          .gt('expires_at', DateTime.now().toUtc().toIso8601String())
           .order('expires_at', ascending: false)
           .limit(1);
       subscriptionExpiresAt = rows.isEmpty
           ? null
           : DateTime.tryParse(rows.first['expires_at'] as String)?.toLocal();
+      try {
+        await supabase.rpc('create_subscription_expiry_reminders');
+      } catch (error) {
+        debugPrint('Create subscription expiry reminders failed: $error');
+        subscriptionReminderLoadFailed = true;
+      }
     } catch (e) {
       debugPrint('Load subscription error: $e');
       subscriptionLoadFailed = true;
@@ -1202,6 +1300,7 @@ class AppState extends ChangeNotifier {
       subscriptionLoading = false;
       notifyListeners();
     }
+
   }
 
   Future<void> loadProfileRating() async {
@@ -1345,6 +1444,14 @@ class AppState extends ChangeNotifier {
     String? additionalPhone,
   }) async {
     authError = '';
+    final passwordValidation = validateSignupPassword(
+      password: password,
+      confirmPassword: password,
+    );
+    if (passwordValidation != null) {
+      authError = passwordValidation;
+      return false;
+    }
     final normalizedEmail = email.trim().toLowerCase();
     final normalizedPhone = phone?.trim() ?? '';
     final normalizedRegion = region?.trim() ?? '';
@@ -1407,7 +1514,7 @@ class AppState extends ChangeNotifier {
       }
       if (verificationMethod == 'whatsapp' && phone != null) {
         await const PhoneAuthService().sendWhatsappSignupCode(phone: phone);
-        return true;
+        return true; 
       }
       _pendingSignup = null;
       authError = 'Please choose a valid verification method.';
@@ -1581,6 +1688,7 @@ class AppState extends ChangeNotifier {
     businessTaxIdentificationNumber = null;
     verificationRequiredServices = [];
     businessVerificationDocuments = {};
+    businessVerificationHistory = [];
     businessVerificationLoadFailed = false;
     businessVerificationLoading = false;
     profileRating = 0;
@@ -1750,8 +1858,10 @@ class AppState extends ChangeNotifier {
       'First name': 'Prénom',
       'Last name': 'Nom',
       'Confirm password': 'Confirmer le mot de passe',
-      'At least 8 characters, with uppercase, lowercase, and a number.':
-          'Au moins 8 caractères, avec une majuscule, une minuscule et un chiffre.',
+        'At least 8 characters.': 'Au moins 8 caractères.',
+        'Choose a password with at least 8 characters.':
+          'Choisissez un mot de passe de 8 caractères minimum.',
+        'Use at least 8 characters.': 'Utilisez au moins 8 caractères.',
       'Verify account with': 'Vérifier le compte avec',
       'Email code': 'Code par e-mail',
       'WhatsApp code': 'Code WhatsApp',
@@ -2158,8 +2268,8 @@ class AppState extends ChangeNotifier {
           'L’inscription a expiré. Veuillez recommencer.',
       'Email verification is not enabled. Please contact support.':
           'La vérification par e-mail n’est pas activée. Contactez le support.',
-      'Password is too weak. Use at least 8 characters with uppercase, lowercase, and a number.':
-          'Mot de passe trop faible. Utilisez au moins 8 caractères avec majuscule, minuscule et chiffre.',
+        'Password must be at least 8 characters.':
+          'Le mot de passe doit comporter au moins 8 caractères.',
       'Password is too weak. Use at least 6 characters.':
           'Mot de passe trop faible. Utilisez au moins 6 caractères.',
       'Too many attempts. Please wait a moment and try again.':
@@ -2378,6 +2488,8 @@ class VerificationDocumentFile {
   });
 }
 
+enum VerificationUploadState { uploading, uploaded, failed }
+
 class CartItem {
   final String? productId;
   final String name;
@@ -2467,6 +2579,31 @@ class AppNotification {
       isRead: row['read_at'] != null,
     );
   }
+}
+
+class BusinessVerificationHistoryEntry {
+  final String id;
+  final String eventType;
+  final String? note;
+  final DateTime createdAt;
+
+  const BusinessVerificationHistoryEntry({
+    required this.id,
+    required this.eventType,
+    required this.note,
+    required this.createdAt,
+  });
+
+  factory BusinessVerificationHistoryEntry.fromRow(
+    Map<String, dynamic> row,
+  ) => BusinessVerificationHistoryEntry(
+    id: row['id'] as String,
+    eventType: row['event_type'] as String,
+    note: row['note'] as String?,
+    createdAt:
+        DateTime.tryParse('${row['created_at']}')?.toLocal() ??
+        DateTime.now(),
+  );
 }
 
 const List<String> productCategories = [

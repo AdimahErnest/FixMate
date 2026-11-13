@@ -8,6 +8,9 @@ const {
   getPlan,
   isFapshiCheckoutUrl,
   normalizeCameroonPhone,
+  runVerificationDocumentRetention,
+  secureTokenMatches,
+  sendOperationalAlert,
 } = require('./server');
 
 const envNames = [
@@ -18,6 +21,8 @@ const envNames = [
   'FAPSHI_API_KEY',
   'FAPSHI_BASE_URL',
   'FAPSHI_WEBHOOK_SECRET',
+  'FIXMATE_ALERT_WEBHOOK_URL',
+  'VERIFICATION_RETENTION_JOB_TOKEN',
   'TWILIO_ACCOUNT_SID',
   'TWILIO_AUTH_TOKEN',
   'TWILIO_VERIFY_SERVICE_SID',
@@ -74,6 +79,93 @@ test('readiness endpoint does not expose configuration details', async (t) => {
     status: 'not_ready',
     checks: { configuration: false },
   });
+});
+
+test('retention job tokens are compared without accepting missing credentials', () => {
+  assert.equal(secureTokenMatches('shared-secret', 'shared-secret'), true);
+  assert.equal(secureTokenMatches('shared-secret', 'other-secret'), false);
+  assert.equal(secureTokenMatches('', 'shared-secret'), false);
+  assert.equal(secureTokenMatches('shared-secret', ''), false);
+});
+
+test('verification retention removes expired private files and records audit events', async (t) => {
+  const originalFetch = global.fetch;
+  const originalEnv = saveEnvironment();
+  const requests = [];
+  t.after(() => {
+    global.fetch = originalFetch;
+    restoreEnvironment(originalEnv);
+  });
+  configureTestEnvironment();
+  global.fetch = async (input, options = {}) => {
+    const url = new URL(input);
+    requests.push({ url, options });
+    if (url.pathname === '/rest/v1/rpc/list_business_verification_documents_for_retention') {
+      assert.equal(options.method, 'POST');
+      const body = JSON.parse(options.body);
+      assert.equal(body.p_limit, 500);
+      assert.match(body.p_reviewed_before, /^2026-07-14T/);
+      return Response.json([{
+        id: 'document-1',
+        user_id: 'user-1',
+        document_key: 'criminal_record',
+        storage_path: 'user-1/criminal_record.pdf',
+      }]);
+    }
+    if (url.pathname === '/rest/v1/business_verification_documents') {
+      assert.equal(options.method, 'DELETE');
+      assert.equal(url.searchParams.get('id'), 'in.(document-1)');
+      return new Response(null, { status: 204 });
+    }
+    if (url.pathname === '/storage/v1/object/business-verification') {
+      assert.equal(options.method, 'DELETE');
+      assert.deepEqual(JSON.parse(options.body), {
+        prefixes: ['user-1/criminal_record.pdf'],
+      });
+      return Response.json({ message: 'Successfully deleted' });
+    }
+    if (url.pathname === '/rest/v1/business_verification_audit') {
+      assert.equal(options.method, 'POST');
+      assert.equal(JSON.parse(options.body)[0].event_type, 'retention_delete');
+      return new Response(null, { status: 201 });
+    }
+    throw new Error(`Unexpected retention request: ${url}`);
+  };
+
+  const result = await runVerificationDocumentRetention(
+    {
+      supabaseUrl: 'https://supabase.example',
+      serviceRoleKey: 'test-service-role-key',
+    },
+    new Date('2026-10-12T00:00:00Z'),
+  );
+  assert.deepEqual(result, { deletedDocuments: 1, reviewedAccounts: 1 });
+  assert.equal(requests.length, 4);
+});
+
+test('operational alerts send generic payloads and rate-limit repeated incidents', async (t) => {
+  const originalFetch = global.fetch;
+  const originalEnv = saveEnvironment();
+  const payloads = [];
+  t.after(() => {
+    global.fetch = originalFetch;
+    restoreEnvironment(originalEnv);
+  });
+  process.env.FIXMATE_ALERT_WEBHOOK_URL = 'https://alerts.example/hook';
+  global.fetch = async (input, options = {}) => {
+    assert.equal(new URL(input).href, 'https://alerts.example/hook');
+    payloads.push(JSON.parse(options.body));
+    return new Response(null, { status: 204 });
+  };
+
+  assert.equal(await sendOperationalAlert('staging-test-incident'), true);
+  assert.equal(await sendOperationalAlert('staging-test-incident'), false);
+  assert.equal(payloads.length, 1);
+  assert.deepEqual(Object.keys(payloads[0]).sort(), [
+    'event',
+    'occurredAt',
+    'service',
+  ]);
 });
 
 test('subscription checkout converts the trusted USD plan and verifies payment', async (t) => {
@@ -175,6 +267,88 @@ test('subscription checkout converts the trusted USD plan and verifies payment',
   assert.equal(status.status, 200);
   assert.deepEqual(await status.json(), { status: 'active' });
   assert.equal(fapshiRequests, 1);
+});
+
+test('subscription polling handles pending, failed, and expired transactions', async (t) => {
+  const originalEnv = saveEnvironment();
+  const originalFetch = global.fetch;
+  const paymentStatuses = new Map([
+    ['subscription-pending', 'PENDING'],
+    ['subscription-failed', 'FAILED'],
+    ['subscription-expired', 'EXPIRED'],
+  ]);
+  const persistedStatuses = new Map();
+  let activationCalls = 0;
+  t.after(() => {
+    global.fetch = originalFetch;
+    restoreEnvironment(originalEnv);
+  });
+  configureTestEnvironment();
+
+  global.fetch = async (input, options = {}) => {
+    const url = new URL(input);
+    if (url.pathname === '/auth/v1/user') {
+      return Response.json({ id: 'user-1', email: 'technician@example.com' });
+    }
+    if (url.pathname === '/rest/v1/subscriptions' && options.method === 'PATCH') {
+      const transId = url.searchParams.get('id')?.replace(/^eq\.id-/, '');
+      persistedStatuses.set(transId, JSON.parse(options.body).status);
+      return new Response(null, { status: 204 });
+    }
+    if (url.pathname === '/rest/v1/subscriptions') {
+      const transId = url.searchParams.get('fapshi_trans_id')?.replace(/^eq\./, '');
+      return Response.json([{
+        id: `id-${transId}`,
+        user_id: 'user-1',
+        amount: 5405,
+        external_id: `external-${transId}`,
+        fapshi_trans_id: transId,
+        status: 'pending',
+      }]);
+    }
+    if (url.pathname.startsWith('/payment-status/')) {
+      const transId = url.pathname.split('/').at(-1);
+      return Response.json({
+        transId,
+        amount: 5405,
+        externalId: `external-${transId}`,
+        userId: 'user-1',
+        status: paymentStatuses.get(transId),
+      });
+    }
+    if (url.pathname === '/rest/v1/rpc/activate_subscription') {
+      activationCalls++;
+      return new Response(null, { status: 204 });
+    }
+    throw new Error(`Unexpected mocked upstream request: ${url}`);
+  };
+
+  const baseUrl = await startServer(t);
+  for (const [transId, expectedStatus] of [
+    ['subscription-pending', 'pending'],
+    ['subscription-failed', 'failed'],
+    ['subscription-expired', 'expired'],
+  ]) {
+    const response = await originalFetch(
+      `${baseUrl}/api/subscriptions/${transId}/status`,
+      {
+        method: 'POST',
+        headers: {
+          Authorization: 'Bearer test-access-token',
+          'Content-Type': 'application/json',
+        },
+        body: '{}',
+      },
+    );
+    assert.equal(response.status, 200);
+    assert.deepEqual(await response.json(), { status: expectedStatus });
+  }
+
+  assert.deepEqual(Object.fromEntries(persistedStatuses), {
+    'subscription-failed': 'failed',
+    'subscription-expired': 'expired',
+  });
+  assert.equal(activationCalls, 0);
 });
 
 test('product checkout trusts the server total and rejects mismatched payment details', async (t) => {

@@ -16,7 +16,7 @@ void main() {
   });
 
   group('signup validation', () {
-    test('accepts a valid contact and strong password', () {
+    test('accepts a valid contact and password with eight characters', () {
       expect(
         validateSignupFields(
           name: 'FixMate customer',
@@ -61,7 +61,7 @@ void main() {
       });
     });
 
-    test('rejects weak or mismatched passwords and invalid emails', () {
+    test('requires eight characters and matching passwords', () {
       expect(
         validateSignupFields(
           name: 'Customer',
@@ -72,10 +72,19 @@ void main() {
         ),
         'Please enter a valid email address.',
       );
-      expect(isStrongSignupPassword('lowercase1'), isFalse);
-      expect(isStrongSignupPassword('Uppercase1'), isTrue);
-      expect(isStrongSignupPassword('Abc1234'), isFalse);
-      expect(isStrongSignupPassword('Abcdefgh'), isFalse);
+      expect(isStrongSignupPassword('Customers1'), isTrue);
+      expect(validateSignupPassword(
+        password: 'password',
+        confirmPassword: 'Customers1',
+      ), 'Passwords do not match.');
+      expect(isStrongSignupPassword('lowercase'), isTrue);
+      expect(isStrongSignupPassword('12345678'), isTrue);
+      expect(isStrongSignupPassword('Abcdefgh'), isTrue);
+      expect(isStrongSignupPassword('1234567'), isFalse);
+      expect(validateSignupPassword(
+        password: 'password',
+        confirmPassword: 'password',
+      ), isNull);
     });
   });
 

@@ -17,6 +17,7 @@ class BusinessVerificationPage extends StatefulWidget {
 
 class _BusinessVerificationPageState extends State<BusinessVerificationPage> {
   final Map<String, VerificationDocumentFile> selectedFiles = {};
+  final Map<String, VerificationUploadState> uploadStates = {};
   final taxIdentificationController = TextEditingController();
   bool submitting = false;
 
@@ -103,6 +104,7 @@ class _BusinessVerificationPageState extends State<BusinessVerificationPage> {
         return;
       }
       final bytes = await file.readAsBytes();
+      verificationDocumentMimeType(fileName: file.name, bytes: bytes);
       setState(() {
         selectedFiles[requirement.key] = VerificationDocumentFile(
           documentKey: requirement.key,
@@ -111,6 +113,7 @@ class _BusinessVerificationPageState extends State<BusinessVerificationPage> {
           fileName: file.name,
           bytes: bytes,
         );
+        uploadStates.remove(requirement.key);
       });
     } catch (error) {
       _showMessage('Could not select the file: $error');
@@ -148,6 +151,15 @@ class _BusinessVerificationPageState extends State<BusinessVerificationPage> {
       taxIdentificationNumber: state.userRole == 'Supplier'
           ? taxIdentificationNumber
           : null,
+      onUploadStateChanged: (documentKey, uploadState) {
+        if (!mounted) return;
+        setState(() {
+          uploadStates[documentKey] = uploadState;
+          if (uploadState == VerificationUploadState.uploaded) {
+            selectedFiles.remove(documentKey);
+          }
+        });
+      },
     );
     if (!mounted) return;
     setState(() => submitting = false);
@@ -281,6 +293,10 @@ class _BusinessVerificationPageState extends State<BusinessVerificationPage> {
                         : 'Documents are optional for now. Submit every item below for admin review and a verified badge when your subscription is active.',
                     style: Theme.of(context).textTheme.bodyLarge,
                   ),
+                  const SizedBox(height: 8),
+                  const Text(
+                    'After you tap Submit, each completed upload is saved privately. If interrupted, retry the submission; completed files will remain saved.',
+                  ),
                   if (status == 'rejected' &&
                       state.businessVerificationReviewNote != null) ...[
                     const SizedBox(height: 12),
@@ -344,6 +360,10 @@ class _BusinessVerificationPageState extends State<BusinessVerificationPage> {
                       child: const Text('Skip for now'),
                     ),
                   ],
+                  if (state.businessVerificationHistory.isNotEmpty) ...[
+                    const SizedBox(height: 20),
+                    _verificationHistory(state),
+                  ],
                 ],
               ),
       ),
@@ -356,33 +376,113 @@ class _BusinessVerificationPageState extends State<BusinessVerificationPage> {
     required bool canUpload,
   }) {
     final selected = selectedFiles[document.key];
+    final uploadState = uploadStates[document.key];
     final exists = state.businessVerificationDocuments.containsKey(
       document.key,
     );
-    final label =
-        selected?.fileName ?? (exists ? 'Previously uploaded' : 'Required');
+    final label = switch (uploadState) {
+      VerificationUploadState.uploading => 'Uploading securely…',
+      VerificationUploadState.failed => 'Upload failed. Tap Submit to retry.',
+      VerificationUploadState.uploaded => 'Saved privately',
+      null =>
+        selected?.fileName ??
+            (exists ? 'Saved privately' : 'Required'),
+    };
     return Card(
       child: ListTile(
         leading: Icon(
-          selected != null || exists
+          uploadState == VerificationUploadState.uploading
+              ? Icons.cloud_upload_outlined
+              : uploadState == VerificationUploadState.failed
+              ? Icons.error_outline
+              : selected != null || exists
               ? Icons.check_circle
               : Icons.upload_file_outlined,
-          color: selected != null || exists
+          color: uploadState == VerificationUploadState.failed
+              ? Theme.of(context).colorScheme.error
+              : selected != null || exists
               ? Colors.green
               : Theme.of(context).colorScheme.primary,
         ),
         title: Text(document.title),
-        subtitle: Text(label),
+        subtitle: uploadState == VerificationUploadState.uploading
+            ? Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(label),
+                  const SizedBox(height: 6),
+                  const LinearProgressIndicator(),
+                ],
+              )
+            : Text(label),
         trailing: canUpload
-            ? IconButton(
-                tooltip: 'Choose document',
-                onPressed: () => chooseFile(document),
-                icon: const Icon(Icons.attach_file),
+            ? Wrap(
+                spacing: 0,
+                children: [
+                  if (selected != null)
+                    IconButton(
+                      tooltip: 'Remove selected file',
+                      onPressed: submitting
+                          ? null
+                          : () => setState(() {
+                              selectedFiles.remove(document.key);
+                              uploadStates.remove(document.key);
+                            }),
+                      icon: const Icon(Icons.close),
+                    ),
+                  IconButton(
+                    tooltip: selected == null
+                        ? 'Choose document'
+                        : 'Replace selected document',
+                    onPressed: submitting ? null : () => chooseFile(document),
+                    icon: const Icon(Icons.attach_file),
+                  ),
+                ],
               )
             : null,
       ),
     );
   }
+
+  Widget _verificationHistory(AppState state) => Card(
+    child: Padding(
+      padding: const EdgeInsets.all(12),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            'Verification history',
+            style: Theme.of(context).textTheme.titleMedium,
+          ),
+          for (final entry in state.businessVerificationHistory)
+            ListTile(
+              contentPadding: EdgeInsets.zero,
+              dense: true,
+              leading: Icon(
+                switch (entry.eventType) {
+                  'approved' => Icons.check_circle_outline,
+                  'rejected' => Icons.error_outline,
+                  _ => Icons.upload_file_outlined,
+                },
+              ),
+              title: Text(
+                switch (entry.eventType) {
+                  'approved' => 'Documents approved',
+                  'rejected' => 'Changes requested',
+                  _ => 'Documents submitted',
+                },
+              ),
+              subtitle: Text(
+                [
+                  entry.createdAt.toString().split('.').first,
+                  if (entry.note != null && entry.note!.isNotEmpty) entry.note!,
+                ].join('\n'),
+              ),
+            ),
+        ],
+      ),
+    ),
+  );
 
   Widget _statusPanel({
     required IconData icon,
@@ -406,6 +506,13 @@ class _BusinessVerificationPageState extends State<BusinessVerificationPage> {
             const SizedBox(height: 12),
             Text(message, textAlign: TextAlign.center),
             if (action != null) ...[const SizedBox(height: 20), action],
+            if (context
+                .watch<AppState>()
+                .businessVerificationHistory
+                .isNotEmpty) ...[
+              const SizedBox(height: 20),
+              _verificationHistory(context.watch<AppState>()),
+            ],
           ],
         ),
       ),

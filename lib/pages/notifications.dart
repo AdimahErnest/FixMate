@@ -32,9 +32,18 @@ class NotificationsPage extends StatelessWidget {
                         : FixMateTheme.gold.withValues(alpha: .09),
                     child: ListTile(
                       leading: Icon(
-                        notification.type == 'paid_order'
-                            ? Icons.shopping_bag_outlined
-                            : Icons.local_shipping_outlined,
+                        switch (notification.type) {
+                          'paid_order' => Icons.shopping_bag_outlined,
+                          'business_verification_approved' =>
+                            Icons.verified_outlined,
+                          'business_verification_rejected' =>
+                            Icons.error_outline,
+                          'subscription_seven_day' ||
+                          'subscription_one_day' ||
+                          'subscription_expired' =>
+                            Icons.event_busy_outlined,
+                          _ => Icons.local_shipping_outlined,
+                        },
                         color: FixMateTheme.gold,
                       ),
                       title: Text(notification.title),

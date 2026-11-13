@@ -5,7 +5,6 @@ import 'package:provider/provider.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'app_state.dart';
 import 'theme.dart';
-import 'widgets/connectivity.dart';
 import 'pages/splash.dart';
 
 void main() async {
@@ -17,7 +16,7 @@ void main() async {
     );
     debugPrint('✅ Supabase connected successfully!');
   } catch (e) {
-    debugPrint('❌ Connection failed: $e');
+    debugPrint('❌ Connection failed: $e');   
   }
   runApp(
     MultiProvider(
@@ -64,9 +63,7 @@ class _FixMateAppState extends State<FixMateApp> {
                 Theme.of(context).brightness,
               ),
             ),
-            child: ConnectivityWrapper(
-              child: child ?? const SizedBox.shrink(),
-            ),
+            child: child ?? const SizedBox.shrink(),
           ),
         );
       },

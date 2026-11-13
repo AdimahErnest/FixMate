@@ -24,6 +24,7 @@ const plans = {
 const exchangeRateUrl = 'https://open.er-api.com/v6/latest/USD';
 const statusChecks = new Map();
 const whatsappSignupRequests = new Map();
+const operationalAlertTimes = new Map();
 
 function config(requireFapshi = true) {
   const values = {
@@ -54,7 +55,137 @@ function config(requireFapshi = true) {
   if (requireFapshi) {
     values.fapshiWebhookSecret = process.env.FAPSHI_WEBHOOK_SECRET || '';
   }
+  values.alertWebhookUrl = process.env.FIXMATE_ALERT_WEBHOOK_URL || '';
+  values.verificationRetentionJobToken =
+    process.env.VERIFICATION_RETENTION_JOB_TOKEN || '';
   return values;
+}
+
+async function sendOperationalAlert(event, now = Date.now()) {
+  const webhookUrl = process.env.FIXMATE_ALERT_WEBHOOK_URL;
+  if (!webhookUrl) return false;
+  const previous = operationalAlertTimes.get(event) ?? 0;
+  if (now - previous < 5 * 60_000) return false;
+  operationalAlertTimes.set(event, now);
+  try {
+    const response = await fetch(webhookUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        service: 'FixMate API',
+        event,
+        occurredAt: new Date(now).toISOString(),
+      }),
+      signal: AbortSignal.timeout(4_000),
+    });
+    if (!response.ok) {
+      console.error(`Operational alert delivery failed for ${event}.`);
+      return false;
+    }
+    return true;
+  } catch {
+    console.error(`Operational alert delivery failed for ${event}.`);
+    return false;
+  }
+}
+
+function secureTokenMatches(suppliedToken, expectedToken) {
+  if (!suppliedToken || !expectedToken) return false;
+  const supplied = Buffer.from(suppliedToken);
+  const expected = Buffer.from(expectedToken);
+  return supplied.length === expected.length &&
+    crypto.timingSafeEqual(supplied, expected);
+}
+
+async function supabaseServiceRequest(cfg, path, options = {}) {
+  return fetch(`${cfg.supabaseUrl}${path}`, {
+    ...options,
+    headers: serviceHeaders(cfg, options.headers),
+    signal: options.signal ?? AbortSignal.timeout(15_000),
+  });
+}
+
+async function runVerificationDocumentRetention(cfg, now = new Date()) {
+  const cutoff = new Date(now.getTime() - 90 * 24 * 60 * 60_000);
+  const documentsResponse = await supabaseServiceRequest(
+    cfg,
+    '/rest/v1/rpc/list_business_verification_documents_for_retention',
+    {
+      method: 'POST',
+      body: JSON.stringify({
+        p_reviewed_before: cutoff.toISOString(),
+        p_limit: 500,
+      }),
+    },
+  );
+  if (!documentsResponse.ok) {
+    throw new Error('Could not load expired verification documents.');
+  }
+  const dueDocuments = await readJson(documentsResponse);
+  if (!Array.isArray(dueDocuments)) {
+    throw new Error('Invalid retention query response.');
+  }
+  if (dueDocuments.length === 0) {
+    return { deletedDocuments: 0, reviewedAccounts: 0 };
+  }
+
+  let deletedDocuments = 0;
+  for (let documentOffset = 0; documentOffset < dueDocuments.length; documentOffset += 50) {
+    const documentBatch = dueDocuments.slice(documentOffset, documentOffset + 50);
+    const removeResponse = await supabaseServiceRequest(
+      cfg,
+      '/storage/v1/object/business-verification',
+      {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          prefixes: documentBatch.map((document) => document.storage_path),
+        }),
+      },
+    );
+    if (!removeResponse.ok) {
+      throw new Error('Could not remove expired verification files from private storage.');
+    }
+
+    const auditRows = documentBatch.map((document) => ({
+      target_user_id: document.user_id,
+      event_type: 'retention_delete',
+      document_key: document.document_key,
+    }));
+    const auditResponse = await supabaseServiceRequest(
+      cfg,
+      '/rest/v1/business_verification_audit',
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Prefer: 'return=minimal',
+        },
+        body: JSON.stringify(auditRows),
+      },
+    );
+    if (!auditResponse.ok) {
+      throw new Error('Could not record verification retention audit events.');
+    }
+
+    const documentIds = documentBatch.map((document) => document.id);
+    const deleteQuery = new URLSearchParams({
+      id: `in.(${documentIds.join(',')})`,
+    });
+    const metadataDelete = await supabaseServiceRequest(
+      cfg,
+      `/rest/v1/business_verification_documents?${deleteQuery}`,
+      { method: 'DELETE' },
+    );
+    if (!metadataDelete.ok) {
+      throw new Error('Could not remove expired verification metadata.');
+    }
+    deletedDocuments += documentBatch.length;
+  }
+  return {
+    deletedDocuments,
+    reviewedAccounts: new Set(dueDocuments.map((document) => document.user_id)).size,
+  };
 }
 
 function normalizeCameroonPhone(value) {
@@ -367,20 +498,20 @@ async function validateAndApplyStatus(cfg, subscription, transaction) {
 function requireFapshiConfig(req, res, next) {
   try {
     req.config = config();
-    next();
+    return next();
   } catch (error) {
     console.error(error.message);
-    res.status(503).json({ error: 'The payment service is not configured.' });
+    return res.status(503).json({ error: 'The payment service is not configured.' });
   }
 }
 
 function requireSupabaseConfig(req, res, next) {
   try {
     req.config = config(false);
-    next();
+    return next();
   } catch (error) {
     console.error(error.message);
-    res.status(503).json({ error: 'Authentication services are not configured.' });
+    return res.status(503).json({ error: 'Authentication services are not configured.' });
   }
 }
 
@@ -413,11 +544,34 @@ app.get('/health/ready', async (_req, res) => {
     exchangeRate: results[2].status === 'fulfilled',
   };
   const ready = Object.values(checks).every(Boolean);
+  if (!ready) await sendOperationalAlert('dependency_readiness_failed');
   res.status(ready ? 200 : 503).json({
     status: ready ? 'ready' : 'not_ready',
     checks,
   });
 });
+
+app.post(
+  '/internal/jobs/prune-verification-documents',
+  requireSupabaseConfig,
+  async (req, res) => {
+    const expectedToken = req.config.verificationRetentionJobToken;
+    const suppliedToken = req.get('x-fixmate-job-token') || '';
+    if (!secureTokenMatches(suppliedToken, expectedToken)) {
+      return res.sendStatus(401);
+    }
+    try {
+      const result = await runVerificationDocumentRetention(req.config);
+      res.json({ status: 'completed', ...result });
+    } catch (error) {
+      console.error('Verification document retention job failed:', error.message);
+      await sendOperationalAlert('verification_document_retention_failed');
+      res.status(503).json({
+        error: 'Verification document cleanup could not be completed.',
+      });
+    }
+  },
+);
 
 async function requireUser(req, res, next) {
   const match = /^Bearer\s+(.+)$/i.exec(req.get('authorization') || '');
@@ -435,7 +589,7 @@ async function requireUser(req, res, next) {
     next();
   } catch (error) {
     console.error('Session validation failed:', error.message);
-    res.status(503).json({ error: 'Could not validate your session. Please try again.' });
+    return res.status(503).json({ error: 'Could not validate your session. Please try again.' });
   }
 }
 
@@ -935,6 +1089,7 @@ app.post('/api/subscriptions/:transId/status', requireFapshiConfig, requireUser,
     res.json({ status: subscription.status });
   } catch (error) {
     console.error('Payment verification failed:', error.message);
+    await sendOperationalAlert('subscription_payment_status_failed');
     res.status(503).json({ error: 'Could not verify payment yet. Please try again.' });
   }
 });
@@ -976,6 +1131,7 @@ app.post('/api/fapshi/webhook', requireFapshiConfig, async (req, res) => {
     res.sendStatus(200);
   } catch (error) {
     console.error('Fapshi webhook processing failed:', error.message);
+    await sendOperationalAlert('fapshi_webhook_processing_failed');
     res.sendStatus(500);
   }
 });
@@ -994,4 +1150,7 @@ module.exports = {
   getUsdToXafRate,
   isFapshiCheckoutUrl,
   normalizeCameroonPhone,
+  runVerificationDocumentRetention,
+  secureTokenMatches,
+  sendOperationalAlert,
 };
